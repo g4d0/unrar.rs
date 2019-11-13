@@ -131,7 +131,9 @@ pub struct OpenArchiveDataEx {
     pub flags: c_uint,
     pub callback: Option<Callback>,
     pub user_data: c_long,
-    pub reserved: [c_uint; 28],
+    pub op_flags: c_uint,
+    pub comment_buffer_w: *mut wchar_t,
+    pub reserved: [c_uint; 25],
 }
 
 // ----------------- BINDINGS ----------------- //
@@ -271,7 +273,9 @@ impl Default for OpenArchiveDataEx {
             flags: 0,
             callback: None,
             user_data: 0,
-            reserved: [0; 28],
+            op_flags: 0,
+            comment_buffer_w: 0 as *mut _,
+            reserved: [0; 25],
         }
     }
 }
