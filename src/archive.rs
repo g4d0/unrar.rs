@@ -3,18 +3,10 @@ use regex::Regex;
 use libc::{c_uint, c_long, c_int};
 use std::str;
 use std::fmt;
-use std::ffi::CStr;
+use std::ffi::{CString, CStr};
 use std::iter::repeat;
 use std::slice;
 use error::*;
-
-macro_rules! cstr {
-    ($e:expr) => ({
-        let mut owned: String = $e.into();
-        owned.push_str("\0");
-        owned
-    })
-}
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -179,7 +171,13 @@ impl<'a> Archive<'a> {
                 path: Option<String>,
                 operation: Operation)
                 -> UnrarResult<OpenArchive> {
-        OpenArchive::new(self.filename, mode, self.password, path, operation)
+        // Not all Strings are valid CStrings as String can contain null bytes.
+        let path = path.and_then(|x| Some(CString::new(x).unwrap()));
+        let password = self.password.and_then(|x| Some(CString::new(x).unwrap()));
+        let filename = CString::new(self.filename)
+            .map_err(|_| UnrarError::from(Code::Unknown, When::Open))?;
+
+        OpenArchive::new(filename, mode, password, path, operation)
     }
 
     /// Returns the bytes for a particular file.
@@ -192,18 +190,18 @@ impl<'a> Archive<'a> {
 pub struct OpenArchive {
     handle: native::Handle,
     operation: Operation,
-    destination: Option<String>,
+    destination: Option<CString>,
     damaged: bool,
 }
 
 impl OpenArchive {
-    fn new(filename: String,
+    fn new(filename: CString,
            mode: OpenMode,
-           password: Option<String>,
-           destination: Option<String>,
+           password: Option<CString>,
+           destination: Option<CString>,
            operation: Operation)
            -> UnrarResult<Self> {
-        let mut data = native::OpenArchiveData::new(cstr!(filename).as_ptr() as *const _,
+        let mut data = native::OpenArchiveData::new(filename.as_ptr() as *const _,
                                                     mode as u32);
         let handle = unsafe { native::RAROpenArchive(&mut data as *mut _) };
         let result = Code::from(data.open_result).unwrap();
@@ -211,12 +209,12 @@ impl OpenArchive {
             Err(UnrarError::from(result, When::Open))
         } else {
             if let Some(pw) = password {
-                unsafe { native::RARSetPassword(handle, cstr!(pw).as_ptr() as *const _) }
+                unsafe { native::RARSetPassword(handle, pw.as_ptr() as *const _) }
             }
-            let dest = destination.map(|path| cstr!(path));
+
             let archive = OpenArchive {
                 handle: handle,
-                destination: dest,
+                destination: destination,
                 damaged: false,
                 operation: operation,
             };
@@ -244,9 +242,9 @@ impl OpenArchive {
         match msg {
             native::UCM_CHANGEVOLUME => {
                 let ptr = p1 as *const _;
-                let next = str::from_utf8(unsafe { CStr::from_ptr(ptr) }.to_bytes()).unwrap();
-                let our_option = unsafe { &mut *(user_data as *mut Option<String>) };
-                *our_option = Some(String::from(next));
+                let next = unsafe { CStr::from_ptr(ptr) }.to_owned();
+                let our_option = unsafe { &mut *(user_data as *mut enum_primitive::Option<CString>) };
+                *our_option = Some(next);
                 match p2 {
                     // Next volume not found. -1 means stop
                     native::RAR_VOL_ASK => -1,
@@ -327,7 +325,7 @@ impl Iterator for OpenArchive {
         if self.damaged {
             return None;
         }
-        let mut volume = None;
+        let mut volume: Option<CString> = None;
         unsafe {
             native::RARSetCallback(self.handle, Self::callback, &mut volume as *mut _ as c_long)
         }
@@ -353,7 +351,8 @@ impl Iterator for OpenArchive {
                         let mut entry = Entry::from(header);
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = volume;
+                            entry.next_volume = volume.as_ref()
+                                .and_then(|x| Some(x.to_str().unwrap().to_owned()));
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
                         } else {
@@ -440,10 +439,8 @@ impl fmt::Display for Entry {
 impl From<native::HeaderData> for Entry {
     fn from(header: native::HeaderData) -> Self {
         Entry {
-            filename: str::from_utf8(unsafe { CStr::from_ptr(header.filename.as_ptr()) }
-                    .to_bytes())
-                .unwrap()
-                .into(),
+            filename: unsafe { CStr::from_ptr(header.filename.as_ptr()) }.to_str().unwrap()
+                .to_owned(),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
             unpacked_size: header.unp_size,
             file_crc: header.file_crc,
