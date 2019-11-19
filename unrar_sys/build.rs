@@ -3,9 +3,19 @@ extern crate cc;
 use std::env::set_var;
 
 fn main() {
+    if cfg!(windows) {
+        println!("cargo:rustc-flags=-lpowrprof");
+        set_var("LDFLAGS", "-pthread");
+    } else {
+        set_var("LDFLAGS", "-pthread");
+    }
+
     set_var("LIBFLAGS", "-fPIC");
-    set_var("LDFLAGS", "-pthread");
-    set_var("CXXFLAGS", "-O2");
+    if cfg!(target_env = "msvc") {
+        set_var("CXXFLAGS", "-O2");
+    } else {
+        set_var("CXXFLAGS", "-O2 -Wno-macro-redefined -Wno-dangling-else -Wno-logical-op-parentheses");
+    }
     cc::Build::new()
         .cpp(true) // Switch to C++ library compilation.
         .define("_FILE_OFFSET_BITS", Some("64"))
