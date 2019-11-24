@@ -1,6 +1,6 @@
 use native;
 use regex::Regex;
-use libc::{c_uint, c_long, c_int};
+use libc::c_int;
 use std::str;
 use std::fmt;
 use std::ffi::{CString, CStr};
@@ -188,7 +188,7 @@ impl<'a> Archive<'a> {
 
 #[derive(Debug)]
 pub struct OpenArchive {
-    handle: native::Handle,
+    handle: native::HANDLE,
     operation: Operation,
     destination: Option<CString>,
     damaged: bool,
@@ -237,7 +237,8 @@ impl OpenArchive {
         }
     }
 
-    extern "C" fn callback(msg: c_uint, user_data: c_long, p1: c_long, p2: c_long) -> c_int {
+    extern "system" fn callback(msg: native::UINT, user_data: native::LPARAM,
+                                p1: native::LPARAM, p2: native::LPARAM) -> c_int {
         // println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
         match msg {
             native::UCM_CHANGEVOLUME => {
@@ -256,16 +257,18 @@ impl OpenArchive {
         }
     }
 
-    extern "C" fn callback_bytes(msg: c_uint, user_data: c_long, p1: c_long, p2: c_long) -> c_int {
-        // println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
+    extern "system" fn callback_bytes(msg: native::UINT, user_data: native::LPARAM,
+                                      p1: native::LPARAM, p2: native::LPARAM) -> c_int {
+        //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
         match msg {
-            native::UCM_PROCESSDATA => {
+            native::UCM_PROCESSDATA if p2 > 0 => {
                 let vec = unsafe { &mut *(user_data as *mut Vec<u8>) };
-                let bytes = unsafe { slice::from_raw_parts(p1 as *const _, p2 as usize) };
+                let ptr = p1 as *const _;
+                let bytes = unsafe { slice::from_raw_parts(ptr, p2 as usize) };
                 vec.extend_from_slice(bytes);
                 1
             }
-            _ => 0,
+            _ => -1,
         }
     }
 
@@ -298,7 +301,7 @@ impl OpenArchive {
                     unsafe {
                         native::RARSetCallback(self.handle,
                                                Self::callback_bytes,
-                                               &mut bytes as *mut _ as c_long)
+                                               &mut bytes as *mut _ as native::LPARAM)
                     }
                     let process_result = Code::from(unsafe {
                         native::RARProcessFile(
@@ -329,7 +332,7 @@ impl Iterator for OpenArchive {
         }
         let mut volume: Option<CString> = None;
         unsafe {
-            native::RARSetCallback(self.handle, Self::callback, &mut volume as *mut _ as c_long)
+            native::RARSetCallback(self.handle, Self::callback, &mut volume as *mut _ as native::LPARAM)
         }
         let mut header = native::HeaderData::default();
         let read_result =
