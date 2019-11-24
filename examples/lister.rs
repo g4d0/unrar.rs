@@ -3,6 +3,7 @@ extern crate unrar;
 use unrar::Archive;
 use unrar::error::{Code, When, UnrarError};
 use std::io::Write;
+use std::path::PathBuf;
 
 fn main() {
     // Basic args parsing
@@ -15,7 +16,7 @@ fn main() {
         std::process::exit(0)
     });
 
-    match Archive::new(file).list_split() {
+    match Archive::new(PathBuf::from(file)).list_split() {
         // Everything okay, just list the archive
         Ok(archive) => list_archive(archive),
 
