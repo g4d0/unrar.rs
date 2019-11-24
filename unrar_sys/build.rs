@@ -13,6 +13,7 @@ fn main() {
     set_var("LIBFLAGS", "-fPIC");
     if cfg!(target_env = "msvc") {
         set_var("CXXFLAGS", "-O2");
+        println!("cargo:rustc-link-lib=shell32");
     } else {
         set_var("CXXFLAGS", "-O2 -Wno-macro-redefined -Wno-dangling-else -Wno-logical-op-parentheses");
     }
