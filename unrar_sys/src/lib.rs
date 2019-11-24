@@ -1,15 +1,35 @@
 extern crate libc;
 #[cfg(all(windows, target_env = "msvc"))]
-pub extern crate winapi;
+extern crate winapi;
 
-use libc::{c_int, c_uint, wchar_t, c_long, c_void, c_uchar};
+use libc::{c_int, c_uint, wchar_t, c_uchar};
 use std::os::raw::c_char;
 
-#[cfg(all(windows, target_env = "msvc"))]
-pub use winapi::shared::minwindef::{LPARAM, UINT};
+// ----------------- ENV SPECIFIC ----------------- //
 
 #[cfg(all(windows, target_env = "msvc"))]
-pub use winapi::shared::ntdef::{HANDLE, LONG};
+mod env {
+    pub use {
+        winapi::shared::minwindef::{LPARAM, UINT},
+        winapi::shared::ntdef::{HANDLE, LONG},
+    };
+}
+
+#[cfg(not(all(windows, target_env = "msvc")))]
+mod env {
+    use super::*;
+    use libc::{c_void, c_long};
+
+    pub type HANDLE = *const c_void;
+    pub type LPARAM = c_long;
+    pub type LONG = c_long;
+    pub type UINT = c_uint;
+}
+
+pub use self::env::HANDLE;
+pub use self::env::LPARAM;
+pub use self::env::LONG;
+pub use self::env::UINT;
 
 // ----------------- CONSTANTS ----------------- //
 
@@ -61,23 +81,9 @@ pub const UCM_NEEDPASSWORD: UINT = 2;
 pub const UCM_CHANGEVOLUMEW: UINT = 3;
 pub const UCM_NEEDPASSWORDW: UINT = 4;
 
-#[cfg(not(all(windows, target_env = "msvc")))]
-pub type HANDLE = *const c_void;
-
-#[cfg(not(all(windows, target_env = "msvc")))]
-pub type LPARAM = c_long;
-
-#[cfg(not(all(windows, target_env = "msvc")))]
-pub type LONG = c_long;
-
-#[cfg(not(all(windows, target_env = "msvc")))]
-pub type UINT = c_uint;
-
 pub type ChangeVolProc = extern "system" fn(*mut c_char, c_int) -> c_int;
 pub type ProcessDataProc = extern "system" fn(*mut c_uchar, c_int) -> c_int;
 pub type Callback = extern "system" fn(UINT, LPARAM, LPARAM, LPARAM) -> c_int;
-
-//pub type Handle = *const c_void;
 
 // ----------------- STRUCTS ----------------- //
 

@@ -1,24 +1,28 @@
 extern crate cc;
 
-use std::env::set_var;
-
 fn main() {
     if cfg!(windows) {
         println!("cargo:rustc-flags=-lpowrprof");
-        set_var("LDFLAGS", "-pthread");
+        println!("cargo:rustc-link-lib=shell32");
+        if cfg!(target_env = "gnu") {
+            println!("cargo:rustc-link-lib=pthread");
+        }
     } else {
-        set_var("LDFLAGS", "-pthread");
+        println!("cargo:rustc-link-lib=pthread");
     }
 
-    set_var("LIBFLAGS", "-fPIC");
-    if cfg!(target_env = "msvc") {
-        set_var("CXXFLAGS", "-O2");
-        println!("cargo:rustc-link-lib=shell32");
-    } else {
-        set_var("CXXFLAGS", "-O2 -Wno-macro-redefined -Wno-dangling-else -Wno-logical-op-parentheses");
-    }
     cc::Build::new()
         .cpp(true) // Switch to C++ library compilation.
+        .opt_level(2)
+        .flag_if_supported("-fPIC")
+        .flag_if_supported("-Wno-macro-redefined")
+        .flag_if_supported("-Wno-dangling-else")
+        .flag_if_supported("-Wno-logical-op-parentheses")
+        .flag_if_supported("-Wno-unused-parameter")
+        .flag_if_supported("-Wno-unused-variable")
+        .flag_if_supported("-Wno-unused-function")
+        .flag_if_supported("-Wno-missing-braces")
+        //.flag_if_supported("-Wno-unknown-pragmas")
         .define("_FILE_OFFSET_BITS", Some("64"))
         .define("_LARGEFILE_SOURCE", None)
         .define("RAR_SMP", None)
