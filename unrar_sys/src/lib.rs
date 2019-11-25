@@ -199,12 +199,6 @@ extern "system" {
     pub fn RARGetDllVersion() -> c_int;
 }
 
-#[cfg(not(all(windows, target_env = "msvc")))]
-extern "C" {
-        pub fn setlocale(category: c_int, locale: *const c_char) -> *mut c_char;
-}
-
-
 // ----------------- MINIMAL ABSTRACTIONS ----------------- //
 
 impl Default for HeaderData {
@@ -261,12 +255,6 @@ impl Default for HeaderDataEx {
 
 impl OpenArchiveData {
     pub fn new(archive: *const c_char, mode: c_uint) -> Self {
-        // Fails on msvc (.UTF-8 is not valid there), also this probably isn't the right solution?
-        #[cfg(not(all(windows, target_env = "msvc")))]
-        unsafe {
-            let _ = setlocale(LC_ALL, b"en_US.UTF-8\0".as_ptr() as *const c_char);
-        }
-
         Self::with_comment_buffer(archive, mode, 0 as *mut _, 0)
     }
 
