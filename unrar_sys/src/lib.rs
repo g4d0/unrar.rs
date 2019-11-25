@@ -1,7 +1,15 @@
 extern crate libc;
+#[cfg(all(windows, target_env = "msvc"))]
+pub extern crate winapi;
 
 use libc::{c_int, c_uint, wchar_t, c_long, c_void, c_uchar};
 use std::os::raw::c_char;
+
+#[cfg(all(windows, target_env = "msvc"))]
+pub use winapi::shared::minwindef::{LPARAM, UINT};
+
+#[cfg(all(windows, target_env = "msvc"))]
+pub use winapi::shared::ntdef::{HANDLE, LONG};
 
 // ----------------- CONSTANTS ----------------- //
 
@@ -33,8 +41,8 @@ pub const RAR_SKIP: c_int = 0;
 pub const RAR_TEST: c_int = 1;
 pub const RAR_EXTRACT: c_int = 2;
 
-pub const RAR_VOL_ASK: c_long = 0;
-pub const RAR_VOL_NOTIFY: c_long = 1;
+pub const RAR_VOL_ASK: LPARAM = 0;
+pub const RAR_VOL_NOTIFY: LPARAM = 1;
 
 pub const RAR_HASH_NONE: c_uint = 0;
 pub const RAR_HASH_CRC32: c_uint = 1;
@@ -47,17 +55,29 @@ pub const RHDF_ENCRYPTED: c_uint = 1 << 2; // 4, 0x4
 pub const RHDF_SOLID: c_uint = 1 << 4; // 16, 0x10
 pub const RHDF_DIRECTORY: c_uint = 1 << 5; // 32, 0x20
 
-pub const UCM_CHANGEVOLUME: c_uint = 0;
-pub const UCM_PROCESSDATA: c_uint = 1;
-pub const UCM_NEEDPASSWORD: c_uint = 2;
-pub const UCM_CHANGEVOLUMEW: c_uint = 3;
-pub const UCM_NEEDPASSWORDW: c_uint = 4;
+pub const UCM_CHANGEVOLUME: UINT = 0;
+pub const UCM_PROCESSDATA: UINT = 1;
+pub const UCM_NEEDPASSWORD: UINT = 2;
+pub const UCM_CHANGEVOLUMEW: UINT = 3;
+pub const UCM_NEEDPASSWORDW: UINT = 4;
 
-pub type ChangeVolProc = extern "C" fn(*mut c_char, c_int) -> c_int;
-pub type ProcessDataProc = extern "C" fn(*mut c_uchar, c_int) -> c_int;
-pub type Callback = extern "C" fn(c_uint, c_long, c_long, c_long) -> c_int;
+#[cfg(not(all(windows, target_env = "msvc")))]
+pub type HANDLE = *const c_void;
 
-pub type Handle = *const c_void;
+#[cfg(not(all(windows, target_env = "msvc")))]
+pub type LPARAM = c_long;
+
+#[cfg(not(all(windows, target_env = "msvc")))]
+pub type LONG = c_long;
+
+#[cfg(not(all(windows, target_env = "msvc")))]
+pub type UINT = c_uint;
+
+pub type ChangeVolProc = extern "system" fn(*mut c_char, c_int) -> c_int;
+pub type ProcessDataProc = extern "system" fn(*mut c_uchar, c_int) -> c_int;
+pub type Callback = extern "system" fn(UINT, LPARAM, LPARAM, LPARAM) -> c_int;
+
+//pub type Handle = *const c_void;
 
 // ----------------- STRUCTS ----------------- //
 
@@ -130,7 +150,7 @@ pub struct OpenArchiveDataEx {
     pub comment_state: c_uint,
     pub flags: c_uint,
     pub callback: Option<Callback>,
-    pub user_data: c_long,
+    pub user_data: LPARAM,
     pub op_flags: c_uint,
     pub comment_buffer_w: *mut wchar_t,
     pub reserved: [c_uint; 25],
@@ -139,36 +159,36 @@ pub struct OpenArchiveDataEx {
 // ----------------- BINDINGS ----------------- //
 
 #[link(name = "unrar", kind = "static")]
-extern "C" {
-    pub fn RAROpenArchive(data: *mut OpenArchiveData) -> Handle;
+extern "system" {
+    pub fn RAROpenArchive(data: *mut OpenArchiveData) -> HANDLE;
 
-    pub fn RAROpenArchiveEx(data: *mut OpenArchiveDataEx) -> Handle;
+    pub fn RAROpenArchiveEx(data: *mut OpenArchiveDataEx) -> HANDLE;
 
-    pub fn RARCloseArchive(handle: Handle) -> c_int;
+    pub fn RARCloseArchive(handle: HANDLE) -> c_int;
 
-    pub fn RARReadHeader(handle: Handle, header_data: *mut HeaderData) -> c_int;
+    pub fn RARReadHeader(handle: HANDLE, header_data: *mut HeaderData) -> c_int;
 
-    pub fn RARReadHeaderEx(handle: Handle, header_data: *mut HeaderDataEx) -> c_int;
+    pub fn RARReadHeaderEx(handle: HANDLE, header_data: *mut HeaderDataEx) -> c_int;
 
-    pub fn RARProcessFile(handle: Handle,
+    pub fn RARProcessFile(handle: HANDLE,
                           operation: c_int,
                           dest_path: *const c_char,
                           dest_name: *const c_char)
                           -> c_int;
 
-    pub fn RARProcessFileW(handle: Handle,
+    pub fn RARProcessFileW(handle: HANDLE,
                            operation: c_int,
                            dest_path: *const wchar_t,
                            dest_name: *const wchar_t)
                            -> c_int;
 
-    pub fn RARSetCallback(handle: Handle, callback: Callback, user_data: c_long);
+    pub fn RARSetCallback(handle: HANDLE, callback: Callback, user_data: LPARAM);
 
-    pub fn RARSetChangeVolProc(handle: Handle, change_vol_proc: ChangeVolProc);
+    pub fn RARSetChangeVolProc(handle: HANDLE, change_vol_proc: ChangeVolProc);
 
-    pub fn RARSetProcessDataProc(handle: Handle, process_data_proc: ProcessDataProc);
+    pub fn RARSetProcessDataProc(handle: HANDLE, process_data_proc: ProcessDataProc);
 
-    pub fn RARSetPassword(handle: Handle, password: *const c_char);
+    pub fn RARSetPassword(handle: HANDLE, password: *const c_char);
 
     pub fn RARGetDllVersion() -> c_int;
 }
