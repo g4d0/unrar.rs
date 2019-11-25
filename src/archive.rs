@@ -317,6 +317,14 @@ impl OpenArchive {
                         }
                     }
 
+                    // Try to reserve the full unpacked size ahead of time.
+                    // Since apparently we can only read max dictionary size at a time
+                    // with the callback.
+                    //
+                    // Max dictionary size is 4MB for RAR 3.x and 4.x,
+                    // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.
+                    bytes.reserve_exact(entry.unpacked_size);
+
                     // So we have the right entry, now set the
                     // callback and read it
                     unsafe {
@@ -428,7 +436,7 @@ bitflags! {
 pub struct Entry {
     pub filename: PathBuf,
     pub flags: EntryFlags,
-    pub unpacked_size: u32,
+    pub unpacked_size: usize,
     pub file_crc: u32,
     pub file_time: u32,
     pub method: u32,
@@ -472,7 +480,7 @@ impl From<native::HeaderData> for Entry {
         Entry {
             filename: PathBuf::from(unsafe { CStr::from_ptr(header.filename.as_ptr()) }.to_str().unwrap()),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
-            unpacked_size: header.unp_size,
+            unpacked_size: header.unp_size as usize,
             file_crc: header.file_crc,
             file_time: header.file_time,
             method: header.method,
@@ -493,7 +501,7 @@ impl From<native::HeaderDataEx> for Entry {
         Entry {
             filename: InternalString::new(filename).into(),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
-            unpacked_size: header.unp_size,
+            unpacked_size: header.unp_size as usize,
             file_crc: header.file_crc,
             file_time: header.file_time,
             method: header.method,
