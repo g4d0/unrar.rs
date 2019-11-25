@@ -15,6 +15,8 @@ fn main() {
         .cpp(true) // Switch to C++ library compilation.
         .opt_level(2)
         .flag_if_supported("-fPIC")
+        .flag_if_supported("-Wno-switch")
+        .flag_if_supported("-Wno-parentheses")
         .flag_if_supported("-Wno-macro-redefined")
         .flag_if_supported("-Wno-dangling-else")
         .flag_if_supported("-Wno-logical-op-parentheses")
@@ -22,7 +24,7 @@ fn main() {
         .flag_if_supported("-Wno-unused-variable")
         .flag_if_supported("-Wno-unused-function")
         .flag_if_supported("-Wno-missing-braces")
-        //.flag_if_supported("-Wno-unknown-pragmas")
+        .flag_if_supported("-Wno-unknown-pragmas")
         .define("_FILE_OFFSET_BITS", Some("64"))
         .define("_LARGEFILE_SOURCE", None)
         .define("RAR_SMP", None)
