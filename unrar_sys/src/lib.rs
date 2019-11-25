@@ -130,7 +130,17 @@ pub struct HeaderDataEx {
     pub dict_size: c_uint,
     pub hash_type: c_uint,
     pub hash: [c_char; 32],
-    pub reserved: [c_uint; 1014],
+    pub redir_type: c_uint,
+    pub redir_name: *mut wchar_t,
+    pub redir_name_size: c_uint,
+    pub dir_target: c_uint,
+    pub mtime_low: c_uint,
+    pub mtime_high: c_uint,
+    pub ctime_low: c_uint,
+    pub ctime_high: c_uint,
+    pub atime_low: c_uint,
+    pub atime_high: c_uint,
+    pub reserved: [c_uint; 988],
 }
 
 #[repr(C)]
@@ -248,7 +258,17 @@ impl Default for HeaderDataEx {
             dict_size: 0,
             hash_type: 0,
             hash: [0; 32],
-            reserved: [0; 1014],
+            redir_type: 0,
+            redir_name: 0 as *mut _,
+            redir_name_size: 0,
+            dir_target: 0,
+            mtime_low: 0,
+            mtime_high: 0,
+            ctime_low: 0,
+            ctime_high: 0,
+            atime_low: 0,
+            atime_high: 0,
+            reserved: [0; 988],
         }
     }
 }
@@ -278,20 +298,28 @@ impl OpenArchiveData {
 
 impl OpenArchiveDataEx {
     pub fn new(archive: *const wchar_t, mode: c_uint) -> Self {
+        Self::with_comment_buffer(archive, mode, 0 as *mut _, 0)
+    }
+
+    pub fn with_comment_buffer(archive_name: *const wchar_t,
+                               open_mode: c_uint,
+                               buffer: *mut wchar_t,
+                               buffer_size: c_uint)
+                               -> Self {
         OpenArchiveDataEx {
             archive_name: 0 as *const _,
-            archive_name_w: archive,
-            open_mode: mode,
+            archive_name_w: archive_name,
+            open_mode: open_mode,
             open_result: 0,
             comment_buffer: 0 as *mut _,
-            comment_buffer_size: 0,
+            comment_buffer_size: buffer_size,
             comment_size: 0,
             comment_state: 0,
             flags: 0,
             callback: None,
             user_data: 0,
             op_flags: 0,
-            comment_buffer_w: 0 as *mut _,
+            comment_buffer_w: buffer,
             reserved: [0; 25],
         }
     }
