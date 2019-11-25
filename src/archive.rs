@@ -34,21 +34,19 @@ lazy_static! {
     static ref EXTENSION: Regex = Regex::new(concat!(mp_ext!(), r"|\.rar$")).unwrap();
 }
 
-pub struct Archive<'a> {
+pub struct Archive {
     filename: PathBuf,
     password: Option<String>,
-    comments: Option<&'a mut Vec<u8>>,
 }
 
 pub type Glob = PathBuf;
 
-impl<'a> Archive<'a> {
+impl Archive {
     /// Creates an `Archive` object to operate on a plain RAR archive.
     pub fn new(file: PathBuf) -> Self {
         Archive {
             filename: file,
             password: None,
-            comments: None,
         }
     }
 
@@ -57,14 +55,7 @@ impl<'a> Archive<'a> {
         Archive {
             filename: file,
             password: Some(password),
-            comments: None,
         }
-    }
-
-    /// Set the comment buffer of the underlying archive.
-    /// Note: Comments are not supported yet so this method will have no effect.
-    pub fn set_comments(&mut self, comments: &'a mut Vec<u8>) {
-        self.comments = Some(comments);
     }
 
     /// Returns `true` if the filename matches a RAR archive.
