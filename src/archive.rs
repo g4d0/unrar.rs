@@ -5,7 +5,7 @@ use libc::c_int;
 use std::str;
 use std::fmt;
 use std::path::{Path, PathBuf};
-use std::ffi::{CString, CStr};
+use std::ffi::CString;
 use std::iter::repeat;
 use std::slice;
 use error::*;
@@ -242,11 +242,13 @@ impl OpenArchive {
                                 p1: native::LPARAM, p2: native::LPARAM) -> c_int {
         // println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
         match msg {
-            native::UCM_CHANGEVOLUME => {
+            native::UCM_CHANGEVOLUMEW => {
                 let ptr = p1 as *const _;
-                let next = unsafe { CStr::from_ptr(ptr) }.to_owned();
-                let our_option = unsafe { &mut *(user_data as *mut enum_primitive::Option<CString>) };
-                *our_option = Some(next);
+                // 2048 seems to be the buffer size in unrar,
+                // also it's the maximum path length since 5.00.
+                let next = unsafe { WideCString::from_ptr_with_nul(ptr, 2048) }.ok();
+                let our_option = unsafe { &mut *(user_data as *mut enum_primitive::Option<WideCString>) };
+                *our_option = next;
                 match p2 {
                     // Next volume not found. -1 means stop
                     native::RAR_VOL_ASK => -1,
@@ -339,7 +341,7 @@ impl Iterator for OpenArchive {
         if self.damaged {
             return None;
         }
-        let mut volume: Option<CString> = None;
+        let mut volume: Option<WideCString> = None;
         unsafe {
             native::RARSetCallback(self.handle, Self::callback, &mut volume as *mut _ as native::LPARAM)
         }
@@ -365,8 +367,7 @@ impl Iterator for OpenArchive {
                         let mut entry = Entry::from(header);
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = volume.as_ref()
-                                .and_then(|x| Some(x.to_str().unwrap().to_owned()));
+                            entry.next_volume = volume.map(|x| InternalString::new(x).into());
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
                         } else {
@@ -416,7 +417,7 @@ pub struct Entry {
     pub file_time: u32,
     pub method: u32,
     pub file_attr: u32,
-    pub next_volume: Option<String>, // TODO: Should be InternalString
+    pub next_volume: Option<PathBuf>,
 }
 
 impl Entry {
