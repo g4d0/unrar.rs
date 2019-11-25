@@ -8,7 +8,6 @@ extern crate lazy_static;
 extern crate enum_primitive;
 #[macro_use]
 extern crate bitflags;
-#[cfg(windows)]
 extern crate widestring;
 
 pub use archive::Archive;

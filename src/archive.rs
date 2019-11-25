@@ -1,5 +1,4 @@
 use native;
-#[cfg(windows)]
 use widestring::WideCString;
 use regex::Regex;
 use libc::c_int;
@@ -203,19 +202,9 @@ impl OpenArchive {
            -> UnrarResult<Self>
     {
         let filename = InternalString::from(filename.as_ref());
-
-        #[cfg(windows)]
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
-        #[cfg(not(windows))]
-        let mut data = native::OpenArchiveData::new(filename.as_ptr() as *const _,
-                                                    mode as u32);
-
-        #[cfg(windows)]
         let handle = unsafe { native::RAROpenArchiveEx(&mut data as *mut _) };
-        #[cfg(not(windows))]
-        let handle = unsafe { native::RAROpenArchive(&mut data as *mut _) };
-
         let result = Code::from(data.open_result).unwrap();
         if handle.is_null() {
             Err(UnrarError::from(result, When::Open))
@@ -360,13 +349,8 @@ impl Iterator for OpenArchive {
                 .unwrap();
         match read_result {
             Code::Success => {
-                #[cfg(windows)]
-                let process_fn = native::RARProcessFileW;
-                #[cfg(not(windows))]
-                let process_fn = native::RARProcessFile;
-
                 let process_result = Code::from(unsafe {
-                    process_fn(
+                    native::RARProcessFileW(
                         self.handle,
                         self.operation as i32,
                         self.destination.as_ref().map(
@@ -466,28 +450,10 @@ impl fmt::Display for Entry {
     }
 }
 
-impl From<native::HeaderData> for Entry {
-    fn from(header: native::HeaderData) -> Self {
-        Entry {
-            filename: PathBuf::from(unsafe { CStr::from_ptr(header.filename.as_ptr()) }.to_str().unwrap()),
-            flags: EntryFlags::from_bits(header.flags).unwrap(),
-            unpacked_size: header.unp_size as usize,
-            file_crc: header.file_crc,
-            file_time: header.file_time,
-            method: header.method,
-            file_attr: header.file_attr,
-            next_volume: None,
-        }
-    }
-}
-
 impl From<native::HeaderDataEx> for Entry {
     fn from(header: native::HeaderDataEx) -> Self {
-        #[cfg(not(windows))]
-        let filename = unsafe { CStr::from_ptr(header.filename.as_ptr()) }.to_owned();
-
-        #[cfg(windows)]
-        let filename = unsafe { WideCString::from_ptr_with_nul(header.filename_w.as_ptr(), 1024) }.unwrap();
+        let filename = unsafe { WideCString::from_ptr_with_nul(header.filename_w.as_ptr()
+                                                               as *const _, 1024) }.unwrap();
 
         Entry {
             filename: InternalString::new(filename).into(),
