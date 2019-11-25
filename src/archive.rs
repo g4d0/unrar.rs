@@ -1,7 +1,7 @@
 use native;
 use widestring::WideCString;
 use regex::Regex;
-use libc::c_int;
+use std::os::raw::c_int;
 use std::str;
 use std::fmt;
 use std::path::{Path, PathBuf};
