@@ -13,7 +13,6 @@ regex = "1"
 lazy_static = "0.1.12"
 enum_primitive = "0.1"
 num = "0.1"
-log = "0.3"
 bitflags = "1"
 
 [dependencies.unrar_sys]
