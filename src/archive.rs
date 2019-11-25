@@ -274,11 +274,11 @@ impl OpenArchive {
         loop {
             let mut header = native::HeaderData::default();
             let read_result =
-                Code::from(unsafe { native::RARReadHeader(self.handle, &mut header as *mut _) as u32 })
-                .unwrap();
+                Code::from(unsafe { native::RARReadHeader(self.handle, &mut header as *mut _) }
+                           as u32).unwrap();
             match read_result {
                 Code::Success => {
-                    let mut entry = Entry::from(header);
+                    let entry = Entry::from(header);
                     if entry.filename != entry_filename {
                         let process_result = Code::from(unsafe {
                             native::RARProcessFile(
@@ -296,7 +296,9 @@ impl OpenArchive {
                     // So we have the right entry, now set the
                     // callback and read it
                     unsafe {
-                        native::RARSetCallback(self.handle, Self::callback_bytes, &mut bytes as *mut _ as c_long)
+                        native::RARSetCallback(self.handle,
+                                               Self::callback_bytes,
+                                               &mut bytes as *mut _ as c_long)
                     }
                     let process_result = Code::from(unsafe {
                         native::RARProcessFile(
