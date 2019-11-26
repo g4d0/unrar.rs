@@ -189,7 +189,7 @@ impl Archive {
 pub struct OpenArchive {
     handle: native::HANDLE,
     operation: Operation,
-    destination: Option<InternalString>,
+    destination: Option<WideCString>,
     damaged: bool,
 }
 
@@ -201,7 +201,7 @@ impl OpenArchive {
            operation: Operation)
            -> UnrarResult<Self>
     {
-        let filename = InternalString::from(filename.as_ref());
+        let filename = filename.as_ref().to_wide_cstring().unwrap();
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
         let handle = unsafe { native::RAROpenArchiveEx(&mut data as *mut _) };
@@ -215,7 +215,7 @@ impl OpenArchive {
 
             let archive = OpenArchive {
                 handle: handle,
-                destination: destination.map(|p| { p.as_ref().into() }),
+                destination: destination.and_then(|p| p.as_ref().to_wide_cstring()),
                 damaged: false,
                 operation: operation,
             };
@@ -367,7 +367,7 @@ impl Iterator for OpenArchive {
                         let mut entry = Entry::from(header);
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = volume.map(|x| InternalString::new(x).into());
+                            entry.next_volume = volume.map(|x| x.to_path_buf());
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
                         } else {
@@ -457,7 +457,7 @@ impl From<native::HeaderDataEx> for Entry {
                                                                as *const _, 1024) }.unwrap();
 
         Entry {
-            filename: InternalString::new(filename).into(),
+            filename: filename.to_path_buf(),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
             unpacked_size: header.unp_size as usize,
             file_crc: header.file_crc,

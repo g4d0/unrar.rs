@@ -1,31 +1,27 @@
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use widestring::WideCString;
 
-#[derive(Debug)]
-pub struct InternalString(pub WideCString);
-pub type InternalStringType = WideCString;
+pub trait ToPathBuf {
+    fn to_path_buf(&self) -> PathBuf;
+}
 
-impl InternalString {
-    pub fn new(inner: InternalStringType) -> Self {
-        Self(inner)
+pub trait ToWideCString {
+    // TODO: Add error type for this.
+    fn to_wide_cstring(&self) -> Option<WideCString>;
+}
+
+impl<T> ToWideCString for T where T: AsRef<std::ffi::OsStr> {
+    fn to_wide_cstring(&self) -> Option<WideCString> {
+        // Will copy. None if self contains nul values.
+        WideCString::from_os_str(&self).ok()
     }
 }
 
-impl std::ops::Deref for InternalString {
-    type Target = InternalStringType;
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl From<&Path> for InternalString {
-    fn from(path: &Path) -> InternalString {
-        InternalString::new(WideCString::from_os_str(path.as_os_str()).unwrap())
-    }
-}
-
-impl From<InternalString> for PathBuf {
-    fn from(path: InternalString) -> PathBuf {
-        PathBuf::from(path.to_os_string())
+impl ToPathBuf for WideCString {
+    fn to_path_buf(&self) -> PathBuf {
+        // TODO: self can contain invalid UTF-16 data, does this cause issues on
+        // non-windows platforms (where non-Unicode sequences get replaced with U+FFFD)?
+        // Would it be better to fail here on such cases?
+        PathBuf::from(self.to_os_string())
     }
 }
