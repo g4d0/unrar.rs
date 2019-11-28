@@ -97,6 +97,20 @@ pub const UCM_NEEDPASSWORD: UINT = 2;
 pub const UCM_CHANGEVOLUMEW: UINT = 3;
 pub const UCM_NEEDPASSWORDW: UINT = 4;
 
+// RAROpenArchiveDataEx::Flags
+pub const ROADF_VOLUME: c_uint = 0x0001;
+pub const ROADF_COMMENT: c_uint = 0x0002;
+pub const ROADF_LOCK: c_uint = 0x0004;
+pub const ROADF_SOLID: c_uint = 0x0008;
+pub const ROADF_NEWNUMBERING: c_uint = 0x0010;
+pub const ROADF_SIGNED: c_uint = 0x0020;
+pub const ROADF_RECOVERY: c_uint = 0x0040;
+pub const ROADF_ENCHEADERS: c_uint = 0x0080;
+pub const ROADF_FIRSTVOLUME: c_uint = 0x0100;
+
+// RAROpenArchiveDataEx::OpFlags
+pub const ROADOF_KEEPBROKEN: c_uint = 0x0001;
+
 pub type ChangeVolProc = extern "system" fn(*mut c_char, c_int) -> c_int;
 pub type ProcessDataProc = extern "system" fn(*mut c_uchar, c_int) -> c_int;
 pub type Callback = extern "system" fn(UINT, LPARAM, LPARAM, LPARAM) -> c_int;
