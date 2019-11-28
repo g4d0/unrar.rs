@@ -8,6 +8,7 @@ use std::path::{Path, PathBuf};
 use std::ffi::CString;
 use std::iter::repeat;
 use std::slice;
+use std::ptr::NonNull;
 use error::*;
 use string::*;
 
@@ -187,7 +188,7 @@ impl Archive {
 
 #[derive(Debug)]
 pub struct OpenArchive {
-    handle: native::HANDLE,
+    handle: NonNull<native::HANDLE>,
     operation: Operation,
     destination: Option<WideCString>,
     damaged: bool,
@@ -204,13 +205,13 @@ impl OpenArchive {
         let filename = filename.as_ref().to_wide_cstring().unwrap();
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
-        let handle = unsafe { native::RAROpenArchiveEx(&mut data as *mut _) };
+        let handle = NonNull::new(unsafe { native::RAROpenArchiveEx(&mut data as *mut _) }
+                                  as *mut _);
         let result = Code::from(data.open_result).unwrap();
-        if handle.is_null() {
-            Err(UnrarError::from(result, When::Open))
-        } else {
+
+        if let Some(handle) = handle {
             if let Some(pw) = password {
-                unsafe { native::RARSetPassword(handle, pw.as_ptr() as *const _) }
+                unsafe { native::RARSetPassword(handle.as_ptr(), pw.as_ptr() as *const _) }
             }
 
             let archive = OpenArchive {
@@ -219,10 +220,13 @@ impl OpenArchive {
                 damaged: false,
                 operation: operation,
             };
+
             match result {
                 Code::Success => Ok(archive),
                 _ => Err(UnrarError::new(result, When::Open, archive)),
             }
+        } else {
+            Err(UnrarError::from(result, When::Open))
         }
     }
 
@@ -280,7 +284,7 @@ impl OpenArchive {
         loop {
             let mut header = native::HeaderDataEx::default();
             let read_result =
-                Code::from(unsafe { native::RARReadHeaderEx(self.handle, &mut header as *mut _) }
+                Code::from(unsafe { native::RARReadHeaderEx(self.handle.as_ptr(), &mut header as *mut _) }
                            as u32).unwrap();
             match read_result {
                 Code::Success => {
@@ -288,7 +292,7 @@ impl OpenArchive {
                     if entry.filename != entry_filename.as_ref() {
                         let process_result = Code::from(unsafe {
                             native::RARProcessFile(
-                                self.handle,
+                                self.handle.as_ptr(),
                                 Operation::Skip as i32,
                                 0 as *const _,
                                 0 as *const _
@@ -310,13 +314,13 @@ impl OpenArchive {
                     // So we have the right entry, now set the
                     // callback and read it
                     unsafe {
-                        native::RARSetCallback(self.handle,
+                        native::RARSetCallback(self.handle.as_ptr(),
                                                Self::callback_bytes,
                                                &mut bytes as *mut _ as native::LPARAM)
                     }
                     let process_result = Code::from(unsafe {
                         native::RARProcessFile(
-                            self.handle,
+                            self.handle.as_ptr(),
                             Operation::Test as i32,
                             0 as *const _,
                             0 as *const _
@@ -343,17 +347,17 @@ impl Iterator for OpenArchive {
         }
         let mut volume: Option<WideCString> = None;
         unsafe {
-            native::RARSetCallback(self.handle, Self::callback, &mut volume as *mut _ as native::LPARAM)
+            native::RARSetCallback(self.handle.as_ptr(), Self::callback, &mut volume as *mut _ as native::LPARAM)
         }
         let mut header = native::HeaderDataEx::default();
         let read_result =
-            Code::from(unsafe { native::RARReadHeaderEx(self.handle, &mut header as *mut _) as u32 })
+            Code::from(unsafe { native::RARReadHeaderEx(self.handle.as_ptr(), &mut header as *mut _) as u32 })
                 .unwrap();
         match read_result {
             Code::Success => {
                 let process_result = Code::from(unsafe {
                     native::RARProcessFileW(
-                        self.handle,
+                        self.handle.as_ptr(),
                         self.operation as i32,
                         self.destination.as_ref().map(
                             |x| x.as_ptr() as *const _
@@ -392,7 +396,7 @@ impl Iterator for OpenArchive {
 impl Drop for OpenArchive {
     fn drop(&mut self) {
         unsafe {
-            native::RARCloseArchive(self.handle);
+            native::RARCloseArchive(self.handle.as_ptr());
         }
     }
 }

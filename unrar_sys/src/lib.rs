@@ -22,7 +22,7 @@ use libc::{c_int, c_uint, wchar_t, c_uchar, c_char};
 mod env {
     pub use {
         winapi::shared::minwindef::{LPARAM, UINT},
-        winapi::shared::ntdef::{HANDLE, LONG},
+        winapi::shared::ntdef::LONG,
     };
 }
 
@@ -34,15 +34,13 @@ mod env {
     use std::os::raw::{c_void, c_long};
 
     #[cfg(not(feature = "std"))]
-    use libc::{c_void, c_long};
+    use libc::{c_long};
 
-    pub type HANDLE = *const c_void;
     pub type LPARAM = c_long;
     pub type LONG = c_long;
     pub type UINT = c_uint;
 }
 
-pub use self::env::HANDLE;
 pub use self::env::LPARAM;
 pub use self::env::LONG;
 pub use self::env::UINT;
@@ -114,6 +112,10 @@ pub const ROADOF_KEEPBROKEN: c_uint = 0x0001;
 pub type ChangeVolProc = extern "system" fn(*mut c_char, c_int) -> c_int;
 pub type ProcessDataProc = extern "system" fn(*mut c_uchar, c_int) -> c_int;
 pub type Callback = extern "system" fn(UINT, LPARAM, LPARAM, LPARAM) -> c_int;
+
+#[repr(C)]
+pub struct HANDLE { _private: [u8; 0] }
+pub type Handle = *const HANDLE;
 
 // ----------------- STRUCTS ----------------- //
 
@@ -206,35 +208,35 @@ pub struct OpenArchiveDataEx {
 
 #[link(name = "unrar", kind = "static")]
 extern "system" {
-    pub fn RAROpenArchive(data: *mut OpenArchiveData) -> HANDLE;
+    pub fn RAROpenArchive(data: *mut OpenArchiveData) -> Handle;
 
-    pub fn RAROpenArchiveEx(data: *mut OpenArchiveDataEx) -> HANDLE;
+    pub fn RAROpenArchiveEx(data: *mut OpenArchiveDataEx) -> Handle;
 
-    pub fn RARCloseArchive(handle: HANDLE) -> c_int;
+    pub fn RARCloseArchive(handle: Handle) -> c_int;
 
-    pub fn RARReadHeader(handle: HANDLE, header_data: *mut HeaderData) -> c_int;
+    pub fn RARReadHeader(handle: Handle, header_data: *mut HeaderData) -> c_int;
 
-    pub fn RARReadHeaderEx(handle: HANDLE, header_data: *mut HeaderDataEx) -> c_int;
+    pub fn RARReadHeaderEx(handle: Handle, header_data: *mut HeaderDataEx) -> c_int;
 
-    pub fn RARProcessFile(handle: HANDLE,
+    pub fn RARProcessFile(handle: Handle,
                           operation: c_int,
                           dest_path: *const c_char,
                           dest_name: *const c_char)
                           -> c_int;
 
-    pub fn RARProcessFileW(handle: HANDLE,
+    pub fn RARProcessFileW(handle: Handle,
                            operation: c_int,
                            dest_path: *const wchar_t,
                            dest_name: *const wchar_t)
                            -> c_int;
 
-    pub fn RARSetCallback(handle: HANDLE, callback: Callback, user_data: LPARAM);
+    pub fn RARSetCallback(handle: Handle, callback: Callback, user_data: LPARAM);
 
-    pub fn RARSetChangeVolProc(handle: HANDLE, change_vol_proc: ChangeVolProc);
+    pub fn RARSetChangeVolProc(handle: Handle, change_vol_proc: ChangeVolProc);
 
-    pub fn RARSetProcessDataProc(handle: HANDLE, process_data_proc: ProcessDataProc);
+    pub fn RARSetProcessDataProc(handle: Handle, process_data_proc: ProcessDataProc);
 
-    pub fn RARSetPassword(handle: HANDLE, password: *const c_char);
+    pub fn RARSetPassword(handle: Handle, password: *const c_char);
 
     pub fn RARGetDllVersion() -> c_int;
 }
