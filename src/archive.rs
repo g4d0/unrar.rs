@@ -1,7 +1,7 @@
 use native;
 use widestring::WideCString;
 use regex::Regex;
-use std::os::raw::c_int;
+use std::os::raw::{c_int, c_uint};
 use std::str;
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -401,6 +401,10 @@ impl Drop for OpenArchive {
     }
 }
 
+fn unpack_unp_size(unp_size: c_uint, unp_size_high: c_uint) -> usize {
+    (unp_size_high << std::mem::size_of::<c_uint>() | unp_size) as usize
+}
+
 bitflags! {
     pub struct EntryFlags: u32 {
         const SPLIT_BEFORE = 0x1;
@@ -463,7 +467,7 @@ impl From<native::HeaderDataEx> for Entry {
         Entry {
             filename: filename.to_path_buf(),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
-            unpacked_size: header.unp_size as usize,
+            unpacked_size: unpack_unp_size(header.unp_size, header.unp_size_high),
             file_crc: header.file_crc,
             file_time: header.file_time,
             method: header.method,
