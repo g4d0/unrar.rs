@@ -36,6 +36,7 @@ enum_from_primitive! {
 pub enum When {
     Open,
     Read,
+    ReadComment,
     Process,
 }
 
@@ -84,6 +85,7 @@ impl<T> fmt::Display for UnrarError<T> {
             (Unknown, _) => write!(f, "Unknown error"),
             (EndArchive, _) => write!(f, "Archive end"),
             (Success, _) => write!(f, "Success"),
+            (_, _) => write!(f, "Unknown error - code: {:?}, when: {:?}", self.code, self.when),
         }
     }
 }
