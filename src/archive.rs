@@ -6,7 +6,7 @@ use std::str;
 use std::fmt;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::ffi::CString;
+use std::ffi::{CString, CStr};
 use std::iter::repeat;
 use std::ptr::NonNull;
 use error::*;
@@ -36,7 +36,7 @@ lazy_static! {
 pub struct Archive<'a> {
     filename: Cow<'a, Path>,
     password: Option<CString>,
-    comments: Option<&'a mut Vec<u8>>,
+    read_comments: bool,
 }
 
 pub type Glob = PathBuf;
@@ -51,7 +51,7 @@ impl<'a> Archive<'a> {
         Ok(Archive {
             filename: Cow::Borrowed(file.as_ref()),
             password: None,
-            comments: None,
+            read_comments: false,
         })
     }
 
@@ -65,14 +65,14 @@ impl<'a> Archive<'a> {
         Ok(Archive {
             filename: Cow::Borrowed(file.as_ref()),
             password: Some(CString::new(password.as_ref())?),
-            comments: None,
+            read_comments: false,
         })
     }
 
-    /// Set the comment buffer of the underlying archive.
-    /// Note: Comments are not supported yet so this method will have no effect.
-    pub fn set_comments(&mut self, comments: &'a mut Vec<u8>) {
-        self.comments = Some(comments);
+    /// Enable reading of the archive comments. File comments are not supported yet.
+    // TODO: Decide on a better interface for this...
+    pub fn enable_comments(&mut self) {
+        self.read_comments = true;
     }
 
     /// Returns `true` if the filename matches a RAR archive.
@@ -199,7 +199,7 @@ impl<'a> Archive<'a> {
                 path: Option<T>,
                 operation: Operation)
                 -> UnrarResult<OpenArchive> {
-        OpenArchive::new(&self.filename, mode, self.password, path.as_ref().map(|x| x.as_ref()), operation)
+        OpenArchive::new(&self.filename, mode, self.password, self.read_comments, path.as_ref().map(|x| x.as_ref()), operation)
     }
 }
 
@@ -207,6 +207,7 @@ impl<'a> Archive<'a> {
 pub struct OpenArchive {
     handle: NonNull<native::HANDLE>,
     operation: Operation,
+    comment: Option<String>,
     destination: Option<WideCString>,
     damaged: bool,
 }
@@ -215,6 +216,7 @@ impl OpenArchive {
     fn new(filename: &Path,
            mode: OpenMode,
            password: Option<CString>,
+           read_comments: bool,
            destination: Option<&Path>,
            operation: Operation)
            -> UnrarResult<Self>
@@ -229,9 +231,47 @@ impl OpenArchive {
 
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
+
+        if read_comments {
+            // Max comment size is 256kb (as of unrar 5.00).
+            // If comments don't fit this they get left out.
+            let mut buffer = Vec::with_capacity(256_000 / std::mem::size_of::<u8>());
+            let ptr = buffer.as_mut_ptr();
+            let cap = buffer.capacity();
+            debug_assert!(cap * std::mem::size_of::<u8>() == 256_000,
+                          "Archive comment buffer should be 256kb not {}.",
+                          cap * std::mem::size_of::<u8>());
+
+            // TODO: Couldn't figure out how to use data.comment_buffer_w
+            data.comment_buffer = ptr as *mut _;
+            data.comment_buffer_size = cap as _;
+            std::mem::forget(buffer);
+        }
+
         let handle = NonNull::new(unsafe { native::RAROpenArchiveEx(&mut data as *mut _) }
                                   as *mut _);
         let result = Code::from(data.open_result).unwrap();
+
+        let comment = if read_comments {
+            assert!(data.comment_size <= data.comment_buffer_size);
+            let buffer = unsafe { Vec::from_raw_parts(data.comment_buffer as *mut _,
+                                                      data.comment_size as usize,
+                                                      data.comment_buffer_size as usize) };
+            data.comment_buffer = std::ptr::null_mut();
+
+            match data.comment_state {
+                0 => { // No comments
+                    debug_assert!(data.comment_size == 0);
+                    None
+                },
+                1 => CStr::from_bytes_with_nul(buffer.as_slice()).ok()
+                    .and_then(|c| c.to_str().ok())
+                    .map(|c| c.to_owned()),
+                _ => return Err(UnrarError::from(Code::from(data.comment_state)
+                                                 .unwrap_or(Code::Unknown),
+                                                 When::ReadComment))
+            }
+        } else { None };
 
         if let Some(handle) = handle {
             if let Some(pw) = password {
@@ -242,6 +282,7 @@ impl OpenArchive {
                 handle: handle,
                 destination: destination,
                 damaged: false,
+                comment: comment,
                 operation: operation,
             };
 
@@ -252,6 +293,10 @@ impl OpenArchive {
         } else {
             Err(UnrarError::from(result, When::Open))
         }
+    }
+
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_ref().map(|x| x.as_str())
     }
 
     pub fn process(&mut self) -> UnrarResult<Vec<Entry>> {
