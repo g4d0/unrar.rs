@@ -45,6 +45,8 @@ pub use self::env::LPARAM;
 pub use self::env::LONG;
 pub use self::env::UINT;
 
+pub type WCHAR = wchar_t;
+
 // ----------------- CONSTANTS ----------------- //
 
 pub const ERAR_SUCCESS: c_int = 0;
@@ -63,9 +65,6 @@ pub const ERAR_UNKNOWN: c_int = 21;
 pub const ERAR_MISSING_PASSWORD: c_int = 22;
 pub const ERAR_EREFERENCE: c_int = 23;
 pub const ERAR_BAD_PASSWORD: c_int = 24;
-
-pub const LC_ALL: c_int = 6;
-
 
 pub const RAR_OM_LIST: c_uint = 0;
 pub const RAR_OM_EXTRACT: c_uint = 1;
