@@ -4,6 +4,7 @@ use regex::Regex;
 use std::os::raw::{c_int, c_uint};
 use std::str;
 use std::fmt;
+use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::ffi::{CString, CStr};
 use std::iter::repeat;
@@ -34,29 +35,36 @@ lazy_static! {
     static ref EXTENSION: Regex = Regex::new(concat!(mp_ext!(), r"|\.rar$")).unwrap();
 }
 
-pub struct Archive {
-    filename: PathBuf,
-    password: Option<String>,
+pub struct Archive<'a> {
+    filename: Cow<'a, Path>,
+    password: Option<&'a str>,
     read_comments: bool,
 }
 
 pub type Glob = PathBuf;
 
-impl Archive {
+impl<'a> Archive<'a> {
     /// Creates an `Archive` object to operate on a plain RAR archive.
-    pub fn new(file: PathBuf) -> Self {
+    pub fn new<T>(file: &'a T) -> Self
+    where
+        T: AsRef<Path> + ?Sized,
+    {
         Archive {
-            filename: file,
+            filename: Cow::Borrowed(file.as_ref()),
             password: None,
             read_comments: false,
         }
     }
 
     /// Creates an `Archive` object to operate on a password encrypted RAR archive.
-    pub fn with_password(file: PathBuf, password: String) -> Self {
+    pub fn with_password<T, U>(file: &'a T, password: &'a U) -> Self
+    where
+        T: AsRef<Path> + ?Sized,
+        U: AsRef<str> + ?Sized,
+    {
         Archive {
-            filename: file,
-            password: Some(password),
+            filename: Cow::Borrowed(file.as_ref()),
+            password: Some(password.as_ref()),
             read_comments: false,
         }
     }
@@ -107,7 +115,7 @@ impl Archive {
     pub fn all_parts(&self) -> Glob {
         match self.all_parts_option() {
             Some(x) => x,
-            None => self.filename.clone(),
+            None => self.filename.to_path_buf(),
         }
     }
 
@@ -144,7 +152,7 @@ impl Archive {
     pub fn first_part(&self) -> PathBuf {
         match self.nth_part(1) {
             Some(x) => x,
-            None => self.filename.clone(),
+            None => self.filename.to_path_buf(),
         }
     }
 
@@ -153,7 +161,7 @@ impl Archive {
     ///
     /// This method does not make any FS operations and operates purely on strings.
     pub fn as_first_part(&mut self) {
-        self.first_part_option().map(|fp| self.filename = fp);
+        self.first_part_option().map(|fp| self.filename = Cow::Owned(fp));
     }
 
     /// Opens the underlying archive for listing its contents
@@ -186,7 +194,7 @@ impl Archive {
         // TODO: Maybe let user know when CString construction fails...
         let password = self.password.and_then(|x| CString::new(x).ok());
 
-        OpenArchive::new(self.filename, mode, password, self.read_comments, path, operation)
+        OpenArchive::new(&self.filename, mode, password, self.read_comments, path.as_ref().map(|x| x.as_ref()), operation)
     }
 
     /// Returns the bytes for a particular file.
@@ -222,15 +230,15 @@ pub struct OpenArchive {
 }
 
 impl OpenArchive {
-    fn new<T: AsRef<Path>, U: AsRef<Path>>(filename: T,
+    fn new(filename: &Path,
            mode: OpenMode,
            password: Option<CString>,
            read_comments: bool,
-           destination: Option<U>,
+           destination: Option<&Path>,
            operation: Operation)
            -> UnrarResult<Self>
     {
-        let filename = filename.as_ref().to_wide_cstring().unwrap();
+        let filename = filename.to_wide_cstring().unwrap();
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
 
@@ -282,7 +290,7 @@ impl OpenArchive {
 
             let archive = OpenArchive {
                 handle: handle,
-                destination: destination.and_then(|p| p.as_ref().to_wide_cstring()),
+                destination: destination.and_then(|p| p.to_wide_cstring()),
                 damaged: false,
                 comment: comment,
                 flags: ArchiveFlags::from_bits(data.flags).unwrap(),
@@ -329,8 +337,8 @@ impl OpenArchive {
         self.flags.contains(ArchiveFlags::FIRST_VOLUME)
     }
 
-    pub fn comment(&self) -> Option<&String> {
-        self.comment.as_ref()
+    pub fn comment(&self) -> Option<&str> {
+        self.comment.as_ref().map(|x| x.as_str())
     }
 
     pub fn process(&mut self) -> UnrarResult<Vec<Entry>> {
@@ -609,36 +617,36 @@ mod tests {
 
     #[test]
     fn glob() {
-        assert_eq!(Archive::new("arc.part0010.rar".into()).all_parts(),
+        assert_eq!(Archive::new("arc.part0010.rar").all_parts(),
                    PathBuf::from("arc.part????.rar"));
-        assert_eq!(Archive::new("archive.r100".into()).all_parts(),
+        assert_eq!(Archive::new("archive.r100").all_parts(),
                    PathBuf::from("archive.r???"));
-        assert_eq!(Archive::new("archive.r9".into()).all_parts(), PathBuf::from("archive.r?"));
-        assert_eq!(Archive::new("archive.999".into()).all_parts(),
+        assert_eq!(Archive::new("archive.r9").all_parts(), PathBuf::from("archive.r?"));
+        assert_eq!(Archive::new("archive.999").all_parts(),
                    PathBuf::from("archive.???"));
-        assert_eq!(Archive::new("archive.rar".into()).all_parts(),
+        assert_eq!(Archive::new("archive.rar").all_parts(),
                    PathBuf::from("archive.rar"));
-        assert_eq!(Archive::new("random_string".into()).all_parts(),
+        assert_eq!(Archive::new("random_string").all_parts(),
                    PathBuf::from("random_string"));
-        assert_eq!(Archive::new("v8/v8.rar".into()).all_parts(), PathBuf::from("v8/v8.rar"));
-        assert_eq!(Archive::new("v8/v8".into()).all_parts(), PathBuf::from("v8/v8"));
+        assert_eq!(Archive::new("v8/v8.rar").all_parts(), PathBuf::from("v8/v8.rar"));
+        assert_eq!(Archive::new("v8/v8").all_parts(), PathBuf::from("v8/v8"));
     }
 
     #[test]
     fn first_part() {
-        assert_eq!(Archive::new("arc.part0010.rar".into()).first_part(),
+        assert_eq!(Archive::new("arc.part0010.rar").first_part(),
                    PathBuf::from("arc.part0001.rar"));
-        assert_eq!(Archive::new("archive.r100".into()).first_part(),
+        assert_eq!(Archive::new("archive.r100").first_part(),
                    PathBuf::from("archive.r001"));
-        assert_eq!(Archive::new("archive.r9".into()).first_part(), PathBuf::from("archive.r1"));
-        assert_eq!(Archive::new("archive.999".into()).first_part(),
+        assert_eq!(Archive::new("archive.r9").first_part(), PathBuf::from("archive.r1"));
+        assert_eq!(Archive::new("archive.999").first_part(),
                    PathBuf::from("archive.001"));
-        assert_eq!(Archive::new("archive.rar".into()).first_part(),
+        assert_eq!(Archive::new("archive.rar").first_part(),
                    PathBuf::from("archive.rar"));
-        assert_eq!(Archive::new("random_string".into()).first_part(),
+        assert_eq!(Archive::new("random_string").first_part(),
                    PathBuf::from("random_string"));
-        assert_eq!(Archive::new("v8/v8.rar".into()).first_part(), PathBuf::from("v8/v8.rar"));
-        assert_eq!(Archive::new("v8/v8".into()).first_part(), PathBuf::from("v8/v8"));
+        assert_eq!(Archive::new("v8/v8.rar").first_part(), PathBuf::from("v8/v8.rar"));
+        assert_eq!(Archive::new("v8/v8").first_part(), PathBuf::from("v8/v8"));
     }
 
     #[test]

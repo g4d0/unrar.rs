@@ -5,7 +5,7 @@ use unrar::Archive;
 
 #[test]
 fn version_cat() {
-    let bytes = &Archive::new("data/version.rar".into())
+    let bytes = &Archive::new("data/version.rar")
         .read_bytes("VERSION")
         .unwrap();
     let s = str::from_utf8(bytes).unwrap();
@@ -14,11 +14,11 @@ fn version_cat() {
 
 #[test]
 fn bytes_eq_unpacked_size() {
-    for entry in Archive::new("data/archive.part1.rar".into()).list().unwrap()
+    for entry in Archive::new("data/archive.part1.rar").list().unwrap()
         .filter(|e| e.as_ref().map(|e| !e.is_split()).unwrap_or(false))
         .map(|e| e.unwrap())
     {
-        let bytes = &Archive::new("data/archive.part1.rar".into()).read_bytes(entry.filename).unwrap();
+        let bytes = &Archive::new("data/archive.part1.rar").read_bytes(entry.filename).unwrap();
         assert_eq!(bytes.len(), entry.unpacked_size);
     }
 }

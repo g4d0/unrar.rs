@@ -8,14 +8,14 @@ use std::path::PathBuf;
 
 #[test]
 fn version_list() {
-    let mut entries = unrar::Archive::new("data/version.rar".into()).list().unwrap();
+    let mut entries = unrar::Archive::new("data/version.rar").list().unwrap();
     assert_eq!(entries.next().unwrap().unwrap().filename, PathBuf::from("VERSION"));
 }
 
 #[test]
 fn version_cat() {
     let t = TempDir::new("unrar").unwrap();
-    unrar::Archive::new("data/version.rar".into())
+    unrar::Archive::new("data/version.rar")
         .extract_to(t.path())
         .unwrap()
         .process()
