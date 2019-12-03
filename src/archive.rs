@@ -264,7 +264,7 @@ impl OpenArchive {
 
         let comment = if read_comments {
             assert!(data.comment_size <= data.comment_buffer_size);
-            let buffer = unsafe { Vec::from_raw_parts(data.comment_buffer as *mut u8,
+            let buffer = unsafe { Vec::from_raw_parts(data.comment_buffer as *mut _,
                                                       data.comment_size as usize,
                                                       data.comment_buffer_size as usize) };
             data.comment_buffer = std::ptr::null_mut();
