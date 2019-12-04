@@ -6,12 +6,15 @@ use std::str;
 use std::fmt;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
-use std::ffi::{CString, CStr};
+use std::ffi::CStr;
 use std::iter::repeat;
 use std::slice;
 use std::ptr::NonNull;
 use error::*;
 use string::*;
+use std::boxed::Box;
+use std::rc::Rc;
+use std::cell::RefCell;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,10 +194,12 @@ impl<'a> Archive<'a> {
                 path: Option<T>,
                 operation: Operation)
                 -> UnrarResult<OpenArchive> {
-        // TODO: Maybe let user know when CString construction fails...
-        let password = self.password.and_then(|x| CString::new(x).ok());
-
-        OpenArchive::new(&self.filename, mode, password, self.read_comments, path.as_ref().map(|x| x.as_ref()), operation)
+        // Since OpenArchive::new is private let's just strip generics here.
+        OpenArchive::new(&self.filename, mode,
+                         self.password,
+                         self.read_comments,
+                         path.as_ref().map(|x| x.as_ref()),
+                         operation)
     }
 
     /// Returns the bytes for a particular file.
@@ -202,6 +207,18 @@ impl<'a> Archive<'a> {
         self.open::<&str>(OpenMode::Extract, None, Operation::Test)?.read_bytes(entry)
     }
 }
+
+
+// Used for passing data to and from the RARProcessFile callback.
+#[derive(Debug)]
+struct Shared {
+    pub password: Option<WideCString>,
+    pub volume: RefCell<Option<WideCString>>,
+    pub bytes: RefCell<Option<Vec<u8>>>,
+}
+
+type SharedData = Rc<Shared>;
+type CallbackFn = Box<dyn FnMut(native::UINT, native::LPARAM, native::LPARAM) -> c_int>;
 
 // TODO: Shouldn't this be in unrar_sys...?
 bitflags! {
@@ -227,12 +244,19 @@ pub struct OpenArchive {
     destination: Option<WideCString>,
     damaged: bool,
     flags: ArchiveFlags,
+    // used to share data between processing and callback
+    user_data: SharedData,
+    callback_ptr: NonNull<CallbackFn>,
 }
 
+// TODO: Could be nice to allow reusing OpenArchive, to better facilitate use cases such as listing
+// archive and operating on files out of order.
+// Unsure if there's any meaningful gains though, as simply doing Archive::new and skipping to a
+// file is plenty fast.
 impl OpenArchive {
     fn new(filename: &Path,
            mode: OpenMode,
-           password: Option<CString>,
+           password: Option<&str>,
            read_comments: bool,
            destination: Option<&Path>,
            operation: Operation)
@@ -241,6 +265,23 @@ impl OpenArchive {
         let filename = filename.to_wide_cstring().unwrap();
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
+
+        // Sneaking in a Rust callback function as data pointer to the FFI callback,
+        // making it easier to pass the real user data to the ProcessFile event handler function.
+        // Also giving way the possibility of letting users of this library pass their own
+        // closures as callbacks.
+        let user_data = Rc::new(Shared {
+            // FIXME: Failing silently.
+            password: password.and_then(|x| WideCString::from_str(x).ok()),
+            volume: RefCell::new(None),
+            bytes: RefCell::new(None),
+        });
+        let user_data_ref = user_data.clone();
+        // Trait object -> Thin pointer -> Raw pointer
+        let boxed_callback = Box::into_raw(Box::new(Box::new(Self::callback_handler(user_data_ref))
+                                                    as CallbackFn));
+        data.user_data = boxed_callback as native::LPARAM;
+        data.callback = Some(Self::callback);
 
         if read_comments {
             // Max comment size is 256kb (as of unrar 5.00).
@@ -284,10 +325,6 @@ impl OpenArchive {
         } else { None };
 
         if let Some(handle) = handle {
-            if let Some(pw) = password {
-                unsafe { native::RARSetPassword(handle.as_ptr(), pw.as_ptr() as *const _) }
-            }
-
             let archive = OpenArchive {
                 handle: handle,
                 destination: destination.and_then(|p| p.to_wide_cstring()),
@@ -295,6 +332,8 @@ impl OpenArchive {
                 comment: comment,
                 flags: ArchiveFlags::from_bits(data.flags).unwrap(),
                 operation: operation,
+                user_data: user_data,
+                callback_ptr: NonNull::new(boxed_callback).unwrap(),
             };
 
             match result {
@@ -354,44 +393,84 @@ impl OpenArchive {
     }
 
     extern "system" fn callback(msg: native::UINT, user_data: native::LPARAM,
-                                p1: native::LPARAM, p2: native::LPARAM) -> c_int {
-        // println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
-        match msg {
-            native::UCM_CHANGEVOLUMEW => {
-                let ptr = p1 as *const _;
-                // 2048 seems to be the buffer size in unrar,
-                // also it's the maximum path length since 5.00.
-                let next = unsafe { WideCString::from_ptr_with_nul(ptr, 2048) }.ok();
-                let our_option = unsafe { &mut *(user_data as *mut enum_primitive::Option<WideCString>) };
-                *our_option = next;
-                match p2 {
-                    // Next volume not found. -1 means stop
-                    native::RAR_VOL_ASK => -1,
-                    // Next volume found, 1 means continue
-                    _ => 1,
-                }
-            }
-            _ => 0,
-        }
+                                p1: native::LPARAM, p2: native::LPARAM) -> c_int
+    {
+        std::panic::catch_unwind(move || {
+            //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
+            let ptr = user_data as *mut CallbackFn;
+            assert!(!ptr.is_null());
+            let f = unsafe { &mut *ptr };
+            f(msg, p1, p2)
+        }).unwrap_or_else(|e| {
+            #[cfg(debug_assertions)]
+            eprintln!("{:?}", e);
+
+            std::process::abort();
+        })
     }
 
-    extern "system" fn callback_bytes(msg: native::UINT, user_data: native::LPARAM,
-                                      p1: native::LPARAM, p2: native::LPARAM) -> c_int {
-        //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
-        match msg {
-            native::UCM_PROCESSDATA if p2 > 0 => {
-                let vec = unsafe { &mut *(user_data as *mut Vec<u8>) };
-                let ptr = p1 as *const _;
-                let bytes = unsafe { slice::from_raw_parts(ptr, p2 as usize) };
-                vec.extend_from_slice(bytes);
-                1
+    // TODO: Could return error messages using SharedData.
+    fn callback_handler(user_data: SharedData)
+                        -> impl FnMut(native::UINT, native::LPARAM, native::LPARAM) -> c_int
+    {
+        move |msg: native::UINT, p1: native::LPARAM, p2: native::LPARAM| {
+            match msg {
+                native::UCM_CHANGEVOLUMEW => {
+                    let ptr = p1 as *const native::WCHAR;
+                    if ptr.is_null() { return -1 }
+
+                    // 2048 seems to be the buffer size in unrar,
+                    // also it's the maximum path length since 5.00.
+                    // TODO: Report on error
+                    if let Ok(next) = unsafe { WideCString::from_ptr_with_nul(ptr as *const _, 2048) } {
+                        user_data.volume.borrow_mut().replace(next);
+                    }
+
+                    match p2 {
+                        // Next volume not found. -1 means stop
+                        native::RAR_VOL_ASK => -1,
+                        // Next volume found, 1 means continue
+                        _ => 1,
+                    }
+                },
+                native::UCM_NEEDPASSWORDW if p2 > 0 => {
+                    if let Some(ref pw) = user_data.password {
+                        let ptr = p1 as *mut native::WCHAR;
+                        let len = p2 as usize;
+
+                        assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
+                        assert!(len <= std::isize::MAX as usize, "Length should be 128, got {}", len);
+                        debug_assert!(len == 128,
+                                      "Max password length should be 127 characters (127 + nul)");
+                        let buf = unsafe { slice::from_raw_parts_mut(ptr as *mut _, len) };
+
+                        let pw = pw.as_slice_with_nul();
+                        if len >= pw.len() { // TODO: Verify that this comparison is correct and not off by one (or more)...
+                            buf[..pw.len()].copy_from_slice(pw);
+                            return 1;
+                        }
+                    }
+                    -1
+                },
+                native::UCM_PROCESSDATA if p2 > 0 => {
+                    if let Some(vec) = user_data.bytes.borrow_mut().as_mut() {
+                        let ptr = p1 as *const u8;
+                        let len = p2 as usize;
+
+                        assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
+                        if len > std::isize::MAX as usize { return -1 }
+                        let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+
+                        vec.extend_from_slice(bytes);
+                    }
+                    1
+                },
+                _ => 1, // Ignore msg and continue
             }
-            _ => -1,
         }
     }
 
     pub fn read_bytes<T: AsRef<Path>>(self, entry_filename: T) -> Result<Vec<u8>, UnrarError<OpenArchive>> {
-        let mut bytes = Vec::new();
         loop {
             let mut header = native::HeaderDataEx::default();
             let read_result =
@@ -420,15 +499,9 @@ impl OpenArchive {
                     //
                     // Max dictionary size is 4MB for RAR 3.x and 4.x,
                     // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.
-                    bytes.reserve_exact(entry.unpacked_size);
+                    self.user_data.bytes.borrow_mut()
+                        .replace(Vec::with_capacity(entry.unpacked_size));
 
-                    // So we have the right entry, now set the
-                    // callback and read it
-                    unsafe {
-                        native::RARSetCallback(self.handle.as_ptr(),
-                                               Self::callback_bytes,
-                                               &mut bytes as *mut _ as native::LPARAM)
-                    }
                     let process_result = Code::from(unsafe {
                         native::RARProcessFile(
                             self.handle.as_ptr(),
@@ -444,7 +517,7 @@ impl OpenArchive {
                 _ => return Err(UnrarError::new(read_result, When::Read, self))
             }
         }
-        Ok(bytes)
+        Ok(self.user_data.bytes.borrow_mut().take().unwrap())
     }
 }
 
@@ -455,10 +528,6 @@ impl Iterator for OpenArchive {
         // The damaged flag was set, don't attempt to read any further, stop
         if self.damaged {
             return None;
-        }
-        let mut volume: Option<WideCString> = None;
-        unsafe {
-            native::RARSetCallback(self.handle.as_ptr(), Self::callback, &mut volume as *mut _ as native::LPARAM)
         }
         let mut header = native::HeaderDataEx::default();
         let read_result =
@@ -482,7 +551,8 @@ impl Iterator for OpenArchive {
                         let mut entry = Entry::from(header);
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = volume.map(|x| x.to_path_buf());
+                            entry.next_volume = self.user_data.volume.borrow_mut()
+                                .take().map(|x| x.to_path_buf());
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
                         } else {
@@ -508,7 +578,11 @@ impl Drop for OpenArchive {
     fn drop(&mut self) {
         unsafe {
             native::RARCloseArchive(self.handle.as_ptr());
+            drop(Box::from_raw(self.callback_ptr.as_ptr() as *mut CallbackFn));
         }
+
+        debug_assert!(Rc::strong_count(&self.user_data) == 1
+                      && Rc::weak_count(&self.user_data) == 0);
     }
 }
 
