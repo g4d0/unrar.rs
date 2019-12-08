@@ -31,10 +31,10 @@ mod env {
     use super::*;
 
     #[cfg(feature = "std")]
-    use std::os::raw::{c_void, c_long};
+    use std::os::raw::c_long;
 
     #[cfg(not(feature = "std"))]
-    use libc::{c_long};
+    use libc::c_long;
 
     pub type LPARAM = c_long;
     pub type LONG = c_long;
