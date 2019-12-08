@@ -401,9 +401,9 @@ impl OpenArchive {
             assert!(!ptr.is_null());
             let f = unsafe { &mut *ptr };
             f(msg, p1, p2)
-        }).unwrap_or_else(|e| {
+        }).unwrap_or_else(|_e| {
             #[cfg(debug_assertions)]
-            eprintln!("{:?}", e);
+            eprintln!("{:?}", _e);
 
             std::process::abort();
         })
