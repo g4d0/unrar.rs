@@ -14,6 +14,7 @@ enum_primitive = "0.1"
 num = "0.1"
 bitflags = "1"
 widestring = "0.4"
+streaming-iterator = "0.1"
 
 [dependencies.unrar_sys]
 path = "unrar_sys"

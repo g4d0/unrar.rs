@@ -7,7 +7,7 @@ fn main() {
     println!(
         "{}",
         str::from_utf8(&Archive::new("version.rar")
-            .read_bytes("VERSION")
+            .read_entry_bytes("VERSION")
             .unwrap())
             .unwrap()
     );

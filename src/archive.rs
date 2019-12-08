@@ -10,11 +10,15 @@ use std::ffi::CStr;
 use std::iter::repeat;
 use std::slice;
 use std::ptr::NonNull;
-use error::*;
-use string::*;
 use std::boxed::Box;
 use std::rc::Rc;
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell, UnsafeCell};
+use std::marker::PhantomData;
+
+pub use streaming_iterator::StreamingIterator;
+
+use error::*;
+use string::*;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -26,10 +30,29 @@ pub enum OpenMode {
 
 #[repr(i32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Operation {
+enum RAROperation {
     Skip = native::RAR_SKIP,
     Test = native::RAR_TEST,
     Extract = native::RAR_EXTRACT,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Operation {
+    Skip,
+    Test,
+    Extract,
+    Bytes,
+}
+
+impl From<Operation> for RAROperation {
+    fn from(op: Operation) -> RAROperation {
+        match op {
+            Operation::Skip => RAROperation::Skip,
+            Operation::Test => RAROperation::Test,
+            Operation::Bytes => RAROperation::Test,
+            Operation::Extract => RAROperation::Extract,
+        }
+    }
 }
 
 macro_rules! mp_ext { () => (r"(\.part|\.r?)(\d+)((?:\.rar)?)$") }
@@ -183,6 +206,11 @@ impl<'a> Archive<'a> {
         self.open(OpenMode::Extract, Some(path), Operation::Extract)
     }
 
+    /// Opens the underlying archive for reading its contents as bytes.
+    pub fn read_bytes(self) -> UnrarResult<OpenArchive> {
+        self.open::<&str>(OpenMode::Extract, None, Operation::Bytes)
+    }
+
     /// Opens the underlying archive for testing.
     pub fn test(self) -> UnrarResult<OpenArchive> {
         self.open::<&str>(OpenMode::Extract, None, Operation::Test)
@@ -203,15 +231,16 @@ impl<'a> Archive<'a> {
     }
 
     /// Returns the bytes for a particular file.
-    pub fn read_bytes<T: AsRef<Path>>(self, entry: T) -> Result<Vec<u8>, UnrarError<OpenArchive>> {
+    pub fn read_entry_bytes<T: AsRef<Path>>(self, entry: T) -> Result<Vec<u8>, UnrarError<OpenArchive>> {
         self.open::<&str>(OpenMode::Extract, None, Operation::Test)?.read_bytes(entry)
     }
 }
 
 
-// Used for passing data to and from the RARProcessFile callback.
+// Used for passing data to and from the RARProcessFile callback, and to UnprocessedEntry.
 #[derive(Debug)]
 struct Shared {
+    pub destination: Option<WideCString>,
     pub password: Option<WideCString>,
     pub volume: RefCell<Option<WideCString>>,
     pub bytes: RefCell<Option<Vec<u8>>>,
@@ -241,8 +270,6 @@ pub struct OpenArchive {
     handle: NonNull<native::HANDLE>,
     operation: Operation,
     comment: Option<String>,
-    destination: Option<WideCString>,
-    damaged: bool,
     flags: ArchiveFlags,
     // used to share data between processing and callback
     user_data: SharedData,
@@ -271,6 +298,7 @@ impl OpenArchive {
         // Also giving way the possibility of letting users of this library pass their own
         // closures as callbacks.
         let user_data = Rc::new(Shared {
+            destination: destination.and_then(|p| p.to_wide_cstring()),
             // FIXME: Failing silently.
             password: password.and_then(|x| WideCString::from_str(x).ok()),
             volume: RefCell::new(None),
@@ -327,8 +355,6 @@ impl OpenArchive {
         if let Some(handle) = handle {
             let archive = OpenArchive {
                 handle: handle,
-                destination: destination.and_then(|p| p.to_wide_cstring()),
-                damaged: false,
                 comment: comment,
                 flags: ArchiveFlags::from_bits(data.flags).unwrap(),
                 operation: operation,
@@ -343,6 +369,12 @@ impl OpenArchive {
         } else {
             Err(UnrarError::from(result, When::Open))
         }
+    }
+
+    /// Convert OpenArchive into a StreamingIterator.
+    #[inline]
+    pub fn iter<'a>(self) -> OpenArchiveStreamingIter<'a> {
+        OpenArchiveStreamingIter::new(self)
     }
 
     pub fn is_locked(&self) -> bool {
@@ -380,8 +412,8 @@ impl OpenArchive {
         self.comment.as_ref().map(|x| x.as_str())
     }
 
-    pub fn process(&mut self) -> UnrarResult<Vec<Entry>> {
-        let (ts, es): (Vec<_>, Vec<_>) = self.partition(|x| x.is_ok());
+    pub fn process(self) -> UnrarResult<Vec<Entry>> {
+        let (ts, es): (Vec<_>, Vec<_>) = self.into_iter().partition(|x| x.is_ok());
         let mut results: Vec<_> = ts.into_iter().map(|x| x.unwrap()).collect();
         match es.into_iter().map(|x| x.unwrap_err()).next() {
             Some(error) => {
@@ -521,7 +553,25 @@ impl OpenArchive {
     }
 }
 
-impl Iterator for OpenArchive {
+
+impl IntoIterator for OpenArchive {
+    type Item = UnrarResult<Entry>;
+    type IntoIter = OpenArchiveIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        OpenArchiveIter {
+            inner: self,
+            damaged: false,
+        }
+    }
+}
+
+pub struct OpenArchiveIter {
+    inner: OpenArchive,
+    damaged: bool,
+}
+
+impl Iterator for OpenArchiveIter {
     type Item = UnrarResult<Entry>;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -531,15 +581,22 @@ impl Iterator for OpenArchive {
         }
         let mut header = native::HeaderDataEx::default();
         let read_result =
-            Code::from(unsafe { native::RARReadHeaderEx(self.handle.as_ptr(), &mut header as *mut _) as u32 })
-                .unwrap();
+            Code::from(unsafe { native::RARReadHeaderEx(self.inner.handle.as_ptr(),
+                                                        &mut header as *mut _) as u32 })
+            .unwrap();
         match read_result {
             Code::Success => {
+                if self.inner.operation == Operation::Bytes {
+                    self.inner.user_data.bytes.borrow_mut()
+                        .replace(Vec::with_capacity(unpack_unp_size(header.unp_size,
+                                                                    header.unp_size_high)));
+                }
+
                 let process_result = Code::from(unsafe {
                     native::RARProcessFileW(
-                        self.handle.as_ptr(),
-                        self.operation as i32,
-                        self.destination.as_ref().map(
+                        self.inner.handle.as_ptr(),
+                        RAROperation::from(self.inner.operation) as i32,
+                        self.inner.user_data.destination.as_ref().map(
                             |x| x.as_ptr() as *const _
                         ).unwrap_or(0 as *const _),
                         0 as *const _
@@ -549,9 +606,20 @@ impl Iterator for OpenArchive {
                 match process_result {
                     Code::Success | Code::EOpen => {
                         let mut entry = Entry::from(header);
+
+                        if self.inner.operation == Operation::Bytes {
+                            entry.bytes = match self.inner.user_data.bytes.borrow_mut().take() {
+                                Some(bytes) => Some(bytes),
+                                None => {
+                                    self.damaged = true;
+                                    return Some(Err(UnrarError::new(Code::Success, When::Process, entry)))
+                                }
+                            };
+                        }
+
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = self.user_data.volume.borrow_mut()
+                            entry.next_volume = self.inner.user_data.volume.borrow_mut()
                                 .take().map(|x| x.to_path_buf());
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
@@ -580,11 +648,234 @@ impl Drop for OpenArchive {
             native::RARCloseArchive(self.handle.as_ptr());
             drop(Box::from_raw(self.callback_ptr.as_ptr() as *mut CallbackFn));
         }
-
-        debug_assert!(Rc::strong_count(&self.user_data) == 1
-                      && Rc::weak_count(&self.user_data) == 0);
     }
 }
+
+
+pub struct OpenArchiveStreamingIter<'a> {
+    inner: OpenArchive,
+    unprocessed_entry: Option<UnrarResult<UnprocessedEntry<'a>>>,
+    damaged: bool,
+}
+
+impl<'a> OpenArchiveStreamingIter<'a> {
+    fn new(archive: OpenArchive) -> Self {
+        Self {
+            inner: archive,
+            unprocessed_entry: None,
+            damaged: false,
+        }
+    }
+}
+
+
+// TODO: Find a way to make Item = UnrarResult<&mut UnprocessedEntry<'a>>
+impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
+    type Item = UnrarResult<UnprocessedEntry<'a>>;
+
+    // Would be great if this was &mut.
+    #[inline]
+    fn get(&self) -> Option<&Self::Item> {
+        self.unprocessed_entry.as_ref()
+    }
+
+    #[inline]
+    fn advance(&mut self)  {
+        // The damaged flag was set, don't attempt to read any further, stop
+        if self.damaged {
+            self.unprocessed_entry = None;
+            return;
+        }
+
+        // Skip unprocessed.
+        if let Some(Ok(unproc)) = self.unprocessed_entry.take() {
+            if !unproc.is_processed.get() {
+                let result = unproc.skip();
+                if let Err(e) = result {
+                    self.damaged = true;
+                    self.inner.user_data.volume.borrow_mut().take();
+                    self.inner.user_data.bytes.borrow_mut().take();
+                    self.unprocessed_entry = Some(Err(UnrarError::from(e.code, e.when)));
+                }
+            }
+        }
+
+        let mut header = native::HeaderDataEx::default();
+        let read_result = Code::from(unsafe { native::RARReadHeaderEx(self.inner.handle.as_ptr(),
+                                                                      &mut header as *mut _)
+                                              as u32 }).unwrap();
+
+        self.unprocessed_entry = match read_result {
+            Code::Success => {
+                 Some(Ok(UnprocessedEntry::new(Entry::from(header),
+                                               self.inner.handle,
+                                               self.inner.user_data.clone())))
+            },
+            Code::EndArchive => {
+                self.damaged = true;
+                None
+            },
+            _ => {
+                self.damaged = true;
+                Some(Err(UnrarError::from(read_result, When::Read)))
+            }
+        }
+    }
+}
+
+
+/// Represents an unprocessed entry returned by the StreamingIterator
+/// implementation, containing the header data in an `Entry` struct.
+///
+/// Can be processed using the methods `skip`, `test`, `extract` and
+/// `read_bytes`. If left unprocessed the iterator will  automatically call
+/// `skip`.
+///
+/// # Panics
+///
+/// Panics if internal entry accessed after processing.
+///
+// Lifetime _must_ be tied to a OpenArchive instance.
+#[derive(Debug)]
+pub struct UnprocessedEntry<'a> {
+    // UnsafeCell used so that we can remove inner Entry without &mut.
+    // StreamingIterator should prevent multiple instances of UnprocessedEntries
+    // from existing, because each item borrows the iterator mutably.
+    entry: UnsafeCell<Option<Entry>>,
+    handle: NonNull<native::HANDLE>,
+    user_data: SharedData,
+    // Remember that we're actually mutably borrowing OpenArchive here.
+    marker: PhantomData<&'a mut OpenArchive>,
+    is_processed: Cell<bool>,
+}
+
+impl<'a> UnprocessedEntry<'a> {
+    fn new(entry: Entry,
+           handle: NonNull<native::HANDLE>,
+           user_data: SharedData,)
+           -> Self
+    {
+        Self {
+            entry: UnsafeCell::new(Some(entry)),
+            is_processed: Cell::new(false),
+            handle,
+            user_data,
+            marker: PhantomData,
+        }
+    }
+
+    #[inline]
+    fn process(&self, op: Operation) -> UnrarResult<()> {
+        // Make sure to mark current entry processed.
+        self.is_processed.set(true);
+
+        let destination =
+            if op == Operation::Extract {
+                self.user_data.destination.as_ref()
+            } else { None };
+
+        let process_result = Code::from(unsafe {
+            native::RARProcessFileW(
+                self.handle.as_ptr(),
+                RAROperation::from(op) as i32,
+                destination.map(|x| x.as_ptr() as *const _)
+                    .unwrap_or(0 as *const _),
+                0 as *const _
+            ) as u32
+        }).unwrap();
+
+        match process_result {
+            Code::Success | Code::EOpen => {
+                // EOpen on Process: Next volume not found
+                if process_result == Code::EOpen {
+                    Err(UnrarError::from(process_result, When::Process))
+                } else {
+                    Ok(())
+                }
+            }
+            _ => {
+                Err(UnrarError::from(process_result, When::Process))
+            }
+        }
+    }
+
+    // Only valid after process().
+    #[inline]
+    fn next_volume(&self) -> Option<PathBuf> {
+        self.user_data.volume.borrow_mut()
+            .take().map(|x| x.to_path_buf())
+    }
+
+    #[inline]
+    fn process_entry(&self, op: Operation) -> UnrarResult<Entry> {
+        let entry = unsafe { &mut *self.entry.get() };
+        assert!(entry.is_some(), "Attempted to process already processed entry");
+
+        let result = self.process(op);
+
+        let mut entry = entry.take().unwrap();
+        entry.next_volume = self.next_volume();
+        match result {
+            Ok(_) => Ok(entry),
+            Err(e) => Err(UnrarError::new(e.code, e.when, entry))
+        }
+    }
+
+    // TODO: Should this return Entry or Vec<u8>?
+    pub fn read_bytes(&self) -> UnrarResult<Entry> {
+        let entry = unsafe { &mut *self.entry.get() };
+        assert!(entry.is_some(), "Attempted to process already processed entry");
+
+        // Try to reserve the full unpacked size ahead of time.
+        // Since apparently we can only read max dictionary size at a time
+        // with the callback.
+        //
+        // Max dictionary size is 4MB for RAR 3.x and 4.x,
+        // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.
+        self.user_data.bytes.borrow_mut()
+            .replace(Vec::with_capacity(entry.as_ref().unwrap().unpacked_size));
+
+        let result = self.process(Operation::Test);
+
+        let mut entry = entry.take().unwrap();
+        entry.next_volume = self.next_volume();
+        entry.bytes = match self.user_data.bytes.borrow_mut().take() {
+            Some(bytes) => Some(bytes),
+            None => return Err(UnrarError::new(Code::Success, When::Process, entry))
+        };
+
+        match result {
+            Ok(_) => Ok(entry),
+            Err(e) => Err(UnrarError::new(e.code, e.when, entry))
+        }
+    }
+
+    // TODO: Should these return Entry or ()?
+    #[inline]
+    pub fn test(&self) -> UnrarResult<Entry> {
+        self.process_entry(Operation::Test)
+    }
+
+    #[inline]
+    pub fn extract(&self) -> UnrarResult<Entry> {
+        self.process_entry(Operation::Extract)
+    }
+
+    #[inline]
+    pub fn skip(&self) -> UnrarResult<Entry> {
+        self.process_entry(Operation::Skip)
+    }
+}
+
+impl<'a> fmt::Display for UnprocessedEntry<'a> {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match unsafe { &mut *self.entry.get() } {
+            Some(e) => e.fmt(f),
+            None => write!(f, "(processed)"),
+        }
+    }
+}
+
 
 fn unpack_unp_size(unp_size: c_uint, unp_size_high: c_uint) -> usize {
     (unp_size_high << std::mem::size_of::<c_uint>() | unp_size) as usize
@@ -603,31 +894,32 @@ bitflags! {
 
 #[derive(Debug)]
 pub struct Entry {
-    pub filename: PathBuf,
-    pub flags: EntryFlags,
-    pub unpacked_size: usize,
-    pub file_crc: u32,
-    pub file_time: u32,
-    pub method: u32,
-    pub file_attr: u32,
-    pub next_volume: Option<PathBuf>,
+    filename: PathBuf,
+    flags: EntryFlags,
+    unpacked_size: usize,
+    file_crc: u32,
+    file_time: u32,
+    method: u32,
+    file_attr: u32,
+    dict_size: usize,
+    next_volume: Option<PathBuf>,
+    bytes: Option<Vec<u8>>,
 }
 
 impl Entry {
-    pub fn is_split(&self) -> bool {
-        self.flags.contains(EntryFlags::SPLIT_BEFORE) || self.flags.contains(EntryFlags::SPLIT_AFTER)
+    #[inline]
+    pub fn bytes(&self) -> Option<&Vec<u8>> {
+        self.bytes.as_ref()
     }
 
-    pub fn is_directory(&self) -> bool {
-        self.flags.contains(EntryFlags::DIRECTORY)
+    #[inline]
+    pub fn take_bytes(mut self) -> Option<Vec<u8>> {
+        self.bytes.take()
     }
 
-    pub fn is_encrypted(&self) -> bool {
-        self.flags.contains(EntryFlags::ENCRYPTED)
-    }
-
-    pub fn is_file(&self) -> bool {
-        !self.is_directory()
+    #[inline]
+    pub fn next_volume(&self) -> Option<&PathBuf> {
+        self.next_volume.as_ref()
     }
 }
 
@@ -655,12 +947,131 @@ impl From<native::HeaderDataEx> for Entry {
             unpacked_size: unpack_unp_size(header.unp_size, header.unp_size_high),
             file_crc: header.file_crc,
             file_time: header.file_time,
-            method: header.method,
+            method: header.method - 0x30,
             file_attr: header.file_attr,
+            dict_size: header.dict_size as usize,
             next_volume: None,
+            bytes: None,
         }
     }
 }
+
+
+// Helper trait for implementing Header trait with less duplication.
+pub trait ArchiveEntry {
+    fn entry(&self) -> &Entry;
+}
+
+impl ArchiveEntry for Entry {
+    #[inline]
+    fn entry(&self) -> &Entry {
+        self
+    }
+}
+
+impl ArchiveEntry for &Entry {
+    #[inline]
+    fn entry(&self) -> &Entry {
+        self
+    }
+}
+
+impl<'a> ArchiveEntry for &UnprocessedEntry<'a> {
+    /// Panics if already processed.
+    #[inline]
+    fn entry(&self) -> &Entry {
+        let entry = unsafe { &mut *self.entry.get() }.as_ref();
+        assert!(entry.is_some(),
+                "Trying to access unprocessed entry that has already been processed");
+        entry.unwrap()
+    }
+}
+
+
+pub trait Header {
+    fn is_split(&self) -> bool;
+    fn is_directory(&self) -> bool;
+    fn is_encrypted(&self) -> bool;
+    fn is_file(&self) -> bool;
+
+    fn filename(&self) -> &Path;
+    fn flags(&self) -> EntryFlags;
+    fn unpacked_size(&self) -> usize;
+    fn file_crc(&self) -> u32;
+    fn file_time(&self) -> u32;
+    fn method(&self) -> u32;
+    fn file_attr(&self) -> u32;
+    fn dict_size(&self) -> usize;
+}
+
+impl<T: ArchiveEntry> Header for T {
+    #[inline]
+    fn is_split(&self) -> bool {
+        self.entry().flags.contains(EntryFlags::SPLIT_BEFORE) || self.entry().flags.contains(EntryFlags::SPLIT_AFTER)
+    }
+
+    #[inline]
+    fn is_directory(&self) -> bool {
+        self.entry().flags.contains(EntryFlags::DIRECTORY)
+    }
+
+    #[inline]
+    fn is_encrypted(&self) -> bool {
+        self.entry().flags.contains(EntryFlags::ENCRYPTED)
+    }
+
+    #[inline]
+    fn is_file(&self) -> bool {
+        !self.entry().is_directory()
+    }
+
+    #[inline]
+    fn filename(&self) -> &Path {
+        self.entry().filename.as_path()
+    }
+
+    #[inline]
+    fn flags(&self) -> EntryFlags {
+        self.entry().flags
+    }
+
+    #[inline]
+    fn unpacked_size(&self) -> usize {
+        self.entry().unpacked_size
+    }
+
+    /// Unpacked file CRC.
+    /// For split files, only the last part contains correct CRC and is only
+    /// accessible in list split mode.
+    #[inline]
+    fn file_crc(&self) -> u32 {
+        self.entry().file_crc
+    }
+
+    /// File date time in MS-DOS format.
+    #[inline]
+    fn file_time(&self) -> u32 {
+        self.entry().file_time
+    }
+
+    /// Packing method, range from weakest to best [0-5].
+    #[inline]
+    fn method(&self) -> u32 {
+        self.entry().method
+    }
+
+    #[inline]
+    fn file_attr(&self) -> u32 {
+        self.entry().file_attr
+    }
+
+    /// The dictionary size used.
+    #[inline]
+    fn dict_size(&self) -> usize {
+        self.entry().dict_size
+    }
+}
+
 
 fn get_rar_extension<T: AsRef<Path>>(path: T) -> Option<String> {
     path.as_ref().extension().map(|ext| {

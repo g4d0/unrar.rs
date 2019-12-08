@@ -36,7 +36,7 @@ fn main() {
     fn list_archive(archive: unrar::archive::OpenArchive) {
         // create a local copy of stderr.
         let mut stderr = std::io::stderr();
-        for entry in archive {
+        for entry in archive.into_iter() {
             match entry {
                 Ok(e) => println!("{}", e),
                 // EOpen @ process() means that next volume was not found / not readable.
@@ -47,7 +47,7 @@ fn main() {
                     // emit warning that an error occured.
                     writeln!(&mut stderr,
                              "Could not find volume: {:?}",
-                             e.next_volume.unwrap())
+                             e.next_volume().unwrap())
                         .unwrap();
                     // The iterator will stop by itself, no further action needed.
                 }

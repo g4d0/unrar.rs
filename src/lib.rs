@@ -8,8 +8,9 @@ extern crate enum_primitive;
 #[macro_use]
 extern crate bitflags;
 extern crate widestring;
+extern crate streaming_iterator;
 
-pub use archive::Archive;
+pub use archive::{Archive, Header, StreamingIterator};
 pub mod error;
 pub mod archive;
 mod string;
