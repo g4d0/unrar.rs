@@ -57,3 +57,18 @@ fn version_cat() {
     file.read_to_string(&mut s).unwrap();
     assert_eq!(s, "target\nCargo.lock\n");
 }
+
+#[test]
+fn list_hp() {
+    let mut entries = Archive::with_password("data/hpw-password.rar", "password").list().unwrap().into_iter();
+    assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from(".gitignore"));
+}
+
+#[test]
+fn no_password_list_hp() {
+    // Password needed in order to list contents, when both header and contents encrypted.
+    let err = Archive::new("data/hpw-password.rar").list().unwrap_err();
+    assert_eq!(err.code, Code::MissingPassword);
+    assert_eq!(err.when, When::Open);
+    assert!(err.data.is_none());
+}
