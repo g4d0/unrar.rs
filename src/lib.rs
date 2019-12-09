@@ -13,4 +13,3 @@ extern crate streaming_iterator;
 pub use archive::{Archive, Header, StreamingIterator};
 pub mod error;
 pub mod archive;
-mod string;

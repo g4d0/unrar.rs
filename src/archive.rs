@@ -18,7 +18,6 @@ use std::marker::PhantomData;
 pub use streaming_iterator::StreamingIterator;
 
 use error::*;
-use string::*;
 
 #[repr(u32)]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -289,7 +288,10 @@ impl OpenArchive {
            operation: Operation)
            -> UnrarResult<Self>
     {
-        let filename = filename.to_wide_cstring().unwrap();
+        // TODO: Add proper error for this
+        // Fails if filename contains nul values.
+        let filename = WideCString::from_os_str(&filename)
+            .map_err(|_| UnrarError::from(Code::Unknown, When::Open))?;
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
 
@@ -298,7 +300,8 @@ impl OpenArchive {
         // Also giving way the possibility of letting users of this library pass their own
         // closures as callbacks.
         let user_data = Rc::new(Shared {
-            destination: destination.and_then(|p| p.to_wide_cstring()),
+            // Fails if destination contains nul values.
+            destination: destination.map(|p| WideCString::from_os_str(&p).unwrap()),
             // FIXME: Failing silently.
             password: password.and_then(|x| WideCString::from_str(x).ok()),
             volume: RefCell::new(None),
@@ -620,7 +623,7 @@ impl Iterator for OpenArchiveIter {
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
                             entry.next_volume = self.inner.user_data.volume.borrow_mut()
-                                .take().map(|x| x.to_path_buf());
+                                .take().map(|x| PathBuf::from(x.to_os_string()));
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
                         } else {
@@ -803,7 +806,7 @@ impl<'a> UnprocessedEntry<'a> {
     #[inline]
     fn next_volume(&self) -> Option<PathBuf> {
         self.user_data.volume.borrow_mut()
-            .take().map(|x| x.to_path_buf())
+            .take().map(|x| PathBuf::from(x.to_os_string()))
     }
 
     #[inline]
@@ -942,7 +945,7 @@ impl From<native::HeaderDataEx> for Entry {
                                                                as *const _, 1024) }.unwrap();
 
         Entry {
-            filename: filename.to_path_buf(),
+            filename: PathBuf::from(filename.to_os_string()),
             flags: EntryFlags::from_bits(header.flags).unwrap(),
             unpacked_size: unpack_unp_size(header.unp_size, header.unp_size_high),
             file_crc: header.file_crc,
