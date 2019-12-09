@@ -4,6 +4,18 @@ use unrar::{Archive, Header, StreamingIterator};
 use std::path::PathBuf;
 
 #[test]
+fn unicode_list() {
+    let mut entries = Archive::new("data/unicode.rar").list().unwrap().into_iter();
+    assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from("te…―st✌"));
+}
+
+#[test]
+fn unicode_list_streaming() {
+    let mut entries = Archive::new("data/unicode.rar").list().unwrap().iter();
+    assert_eq!(entries.next().unwrap().as_ref().unwrap().filename(), PathBuf::from("te…―st✌"));
+}
+
+#[test]
 fn foobar_list() {
     let mut entries = Archive::new("data/utf8.rar").list().unwrap().into_iter();
     assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from("foo—bar"));
