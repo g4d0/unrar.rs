@@ -350,9 +350,8 @@ impl OpenArchive {
                     debug_assert!(data.comment_size == 0);
                     None
                 },
-                1 => CStr::from_bytes_with_nul(buffer.as_slice()).ok()
-                    .and_then(|c| c.to_str().ok())
-                    .map(|c| c.to_owned()),
+                1 => Some(CStr::from_bytes_with_nul(buffer.as_slice())?
+                          .to_str()?.to_owned()),
                 _ => return Err(UnrarError::from(Code::from(data.comment_state)
                                                  .unwrap_or(Code::Unknown),
                                                  When::ReadComment))
