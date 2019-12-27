@@ -72,3 +72,10 @@ fn no_password_list_hp() {
     assert_eq!(err.when, When::Open);
     assert!(err.data.is_none());
 }
+
+#[test]
+fn list_enc_headers_no_pw() {
+    let err = Archive::new("data/utf8-password-encheader.rar").list().unwrap_err();
+    assert_eq!(err.code, Code::MissingPassword);
+    assert_eq!(err.when, When::Open);
+}
