@@ -109,3 +109,10 @@ impl<T> UnrarError<T> {
 }
 
 pub type UnrarResult<T> = Result<T, UnrarError<T>>;
+
+// TODO: Add proper error for these
+impl<T, C: widestring::UChar> From<widestring::NulError<C>> for UnrarError<T> {
+    fn from(_: widestring::NulError<C>) -> UnrarError<T> {
+        UnrarError::from(Code::Unknown, When::Open)
+    }
+}

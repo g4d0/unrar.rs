@@ -288,10 +288,16 @@ impl OpenArchive {
            operation: Operation)
            -> UnrarResult<Self>
     {
-        // TODO: Add proper error for this
-        // Fails if filename contains nul values.
-        let filename = WideCString::from_os_str(&filename)
-            .map_err(|_| UnrarError::from(Code::Unknown, When::Open))?;
+        let password = match password {
+            Some(pw) => Some(WideCString::from_str(pw)?),
+            None => None,
+        };
+        let destination = match destination {
+            Some(dest) => Some(WideCString::from_os_str(&dest)?),
+            None => None,
+        };
+        let filename = WideCString::from_os_str(&filename)?;
+
         let mut data = native::OpenArchiveDataEx::new(filename.as_ptr() as *const _,
                                                       mode as u32);
 
@@ -300,10 +306,8 @@ impl OpenArchive {
         // Also giving way the possibility of letting users of this library pass their own
         // closures as callbacks.
         let user_data = Rc::new(Shared {
-            // Fails if destination contains nul values.
-            destination: destination.map(|p| WideCString::from_os_str(&p).unwrap()),
-            // FIXME: Failing silently.
-            password: password.and_then(|x| WideCString::from_str(x).ok()),
+            destination,
+            password,
             volume: RefCell::new(None),
             bytes: RefCell::new(None),
         });
@@ -1146,5 +1150,22 @@ mod tests {
         assert_eq!(super::is_archive(&PathBuf::from("archive.part1rar")), false);
         assert_eq!(super::is_archive(&PathBuf::from("archive.rar\n")), false);
         assert_eq!(super::is_archive(&PathBuf::from("archive.zip")), false);
+    }
+
+    #[test]
+    fn nul_in_input() {
+        use crate::error::{Code, When};
+
+        let err = Archive::new("\0archive.rar").list().unwrap_err();
+        assert_eq!(err.code, Code::Unknown);
+        assert_eq!(err.when, When::Open);
+
+        let err = Archive::with_password("archive.rar", "un\0rar").list().unwrap_err();
+        assert_eq!(err.code, Code::Unknown);
+        assert_eq!(err.when, When::Open);
+
+        let err = Archive::new("archive.rar").extract_to("tmp/\0").unwrap_err();
+        assert_eq!(err.code, Code::Unknown);
+        assert_eq!(err.when, When::Open);
     }
 }
