@@ -79,3 +79,29 @@ fn list_enc_headers_no_pw() {
     assert_eq!(err.code, Code::MissingPassword);
     assert_eq!(err.when, When::Open);
 }
+
+#[test]
+fn max_len_pw() {
+    let t = TempDir::new("unrar").unwrap();
+    Archive::with_password("data/max-len-password.rar", &"x".repeat(127))
+        .extract_to(t.path())
+        .unwrap()
+        .process()
+        .unwrap();
+    let mut file = File::open(t.path().join(".gitignore")).unwrap();
+    let mut s = String::new();
+    file.read_to_string(&mut s).unwrap();
+    assert_eq!(s, "target\nCargo.lock\n");
+}
+
+#[test]
+fn too_long_pw() {
+    let t = TempDir::new("unrar").unwrap();
+    let mut entries = Archive::with_password("data/max-len-password.rar", &"x".repeat(128))
+        .extract_to(t.path())
+        .unwrap()
+        .into_iter();
+    let err = entries.next().unwrap().unwrap_err();
+    assert_eq!(err.code, Code::MissingPassword);
+    assert_eq!(err.when, When::Process);
+}

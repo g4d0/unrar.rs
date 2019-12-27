@@ -477,13 +477,21 @@ impl OpenArchive {
                         let len = p2 as usize;
 
                         assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
-                        assert!(len <= std::isize::MAX as usize, "Length should be 128, got {}", len);
+                        // This is an assert, because len this large would be
+                        // extremely unusual (expected value is 128).
+                        assert!(len <= std::isize::MAX as usize,
+                                "slice::from_raw_parts_mut expects length to be under {}, got {}",
+                                std::isize::MAX, len);
+
+                        // Our current expectation from the underlying unrar library.
                         debug_assert!(len == 128,
                                       "Max password length should be 127 characters (127 + nul)");
+
                         let buf = unsafe { slice::from_raw_parts_mut(ptr as *mut _, len) };
 
                         let pw = pw.as_slice_with_nul();
-                        if len >= pw.len() { // TODO: Verify that this comparison is correct and not off by one (or more)...
+                        // TODO: Pass a proper error message through user_data.
+                        if len >= pw.len() {
                             buf[..pw.len()].copy_from_slice(pw);
                             return 1;
                         }
@@ -496,6 +504,7 @@ impl OpenArchive {
                         let len = p2 as usize;
 
                         assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
+                        // TODO: Pass a proper error message through user_data.
                         if len > std::isize::MAX as usize { return -1 }
                         let bytes = unsafe { slice::from_raw_parts(ptr, len) };
 
