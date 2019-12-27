@@ -138,3 +138,16 @@ impl From<ffi::NulError> for NulError {
         NulError(e.nul_position())
     }
 }
+
+// TODO: Add proper error for these
+impl<T> From<std::ffi::FromBytesWithNulError> for UnrarError<T> {
+    fn from(_: std::ffi::FromBytesWithNulError) -> UnrarError<T> {
+        UnrarError::from(Code::Unknown, When::Open)
+    }
+}
+
+impl<T> From<std::str::Utf8Error> for UnrarError<T> {
+    fn from(_: std::str::Utf8Error) -> UnrarError<T> {
+        UnrarError::from(Code::Unknown, When::Open)
+    }
+}
