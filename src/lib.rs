@@ -10,6 +10,12 @@ extern crate bitflags;
 extern crate widestring;
 extern crate streaming_iterator;
 
-pub use archive::{Archive, Header, StreamingIterator};
+pub use archive::Archive;
+pub use entry::Header;
+pub use streaming::StreamingIterator;
+
 pub mod error;
 pub mod archive;
+pub mod entry;
+pub mod streaming;
+pub mod reader;
