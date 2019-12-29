@@ -20,6 +20,13 @@ fn version_list_streaming() {
 }
 
 #[test]
+fn version_list_reader() {
+    let mut entries = Archive::new("data/version.rar").list().unwrap().reader();
+    let head = entries.read_next_header().unwrap();
+    assert_eq!(head.unwrap().skip().unwrap().filename(), PathBuf::from("VERSION"));
+}
+
+#[test]
 fn version_cat() {
     let t = TempDir::new("unrar").unwrap();
     Archive::new("data/version.rar")

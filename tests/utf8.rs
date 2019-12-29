@@ -41,6 +41,12 @@ fn unicode_list_streaming() {
 }
 
 #[test]
+fn unicode_list_reader() {
+    let mut entries = Archive::new("data/unicode.rar").list().unwrap().reader();
+    assert_eq!(entries.read_next_header().unwrap().unwrap().filename(), PathBuf::from("te…―st✌"));
+}
+
+#[test]
 fn foobar_list() {
     let mut entries = Archive::new("data/utf8.rar").list().unwrap().into_iter();
     assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from("foo—bar"));

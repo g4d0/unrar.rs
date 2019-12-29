@@ -23,6 +23,13 @@ fn list_streaming() {
 }
 
 #[test]
+fn list_reader() {
+    // No password needed in order to list contents
+    let mut entries = Archive::new("data/crypted.rar").list().unwrap().reader();
+    assert_eq!(entries.read_next_header().unwrap().unwrap().filename(), PathBuf::from(".gitignore"));
+}
+
+#[test]
 fn no_password() {
     let t = TempDir::new("unrar").unwrap();
     let mut arc = Archive::new("data/crypted.rar")
@@ -40,6 +47,17 @@ fn no_password_streaming() {
         .extract_to(t.path())
         .unwrap().iter();
     let err = arc.next().unwrap().as_ref().unwrap().extract().unwrap_err();
+    assert_eq!(err.code, Code::MissingPassword);
+    assert_eq!(err.when, When::Process);
+}
+
+#[test]
+fn no_password_reader() {
+    let t = TempDir::new("unrar").unwrap();
+    let mut arc = Archive::new("data/crypted.rar")
+        .extract_to(t.path())
+        .unwrap().reader();
+    let err = arc.read_next_header().unwrap().unwrap().extract().unwrap_err();
     assert_eq!(err.code, Code::MissingPassword);
     assert_eq!(err.when, When::Process);
 }
