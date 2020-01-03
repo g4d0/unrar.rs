@@ -116,7 +116,7 @@ impl<'a> EntryHeader<'a> {
                 self.handle.as_ptr(),
                 operation as i32,
                 destination.map(|x| x.as_ptr() as *const _)
-                    .unwrap_or(std::ptr::null()),
+                    .unwrap_or(ptr::null()),
                 ptr::null()
             ) as u32
         }).unwrap();

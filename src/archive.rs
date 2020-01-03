@@ -3,16 +3,16 @@ use widestring::WideCString;
 use regex::Regex;
 use std::os::raw::c_int;
 use std::str;
+use std::isize;
+use std::slice;
+use std::mem;
+use std::ptr;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::ffi::CStr;
 use std::iter::repeat;
 use std::panic::catch_unwind;
 use std::process::abort;
-use std::isize;
-use std::slice;
-use std::mem;
-use std::ptr;
 use std::ptr::NonNull;
 use std::boxed::Box;
 use std::rc::Rc;
@@ -530,8 +530,8 @@ impl Iterator for OpenArchiveListIter {
                     native::RARProcessFileW(
                         self.inner.handle.as_ptr(),
                         Operation::Skip as i32,
-                        std::ptr::null(),
-                        std::ptr::null()
+                        ptr::null(),
+                        ptr::null()
                     ) as u32
                 }).unwrap();
 
