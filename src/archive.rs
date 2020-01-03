@@ -8,6 +8,8 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::ffi::{CString, CStr};
 use std::iter::repeat;
+use std::mem;
+use std::ptr;
 use std::ptr::NonNull;
 use error::*;
 
@@ -235,17 +237,16 @@ impl OpenArchive {
         if read_comments {
             // Max comment size is 256kb (as of unrar 5.00).
             // If comments don't fit this they get left out.
-            let mut buffer = Vec::with_capacity(256_000 / std::mem::size_of::<u8>());
+            let mut buffer = mem::ManuallyDrop::new(Vec::with_capacity(256_000 / mem::size_of::<u8>()));
             let ptr = buffer.as_mut_ptr();
             let cap = buffer.capacity();
-            debug_assert!(cap * std::mem::size_of::<u8>() == 256_000,
-                          "Archive comment buffer should be 256kb not {}.",
-                          cap * std::mem::size_of::<u8>());
+            debug_assert_eq!(cap * mem::size_of::<u8>(), 256_000,
+                             "Comment buffer should be 256kb");
 
-            // TODO: Couldn't figure out how to use data.comment_buffer_w
+            // TODO: Couldn't figure out how to use data.comment_buffer_w (access violation).
             data.comment_buffer = ptr as *mut _;
+            data.comment_buffer_w = ptr::null_mut();
             data.comment_buffer_size = cap as _;
-            std::mem::forget(buffer);
         }
 
         let handle = NonNull::new(unsafe { native::RAROpenArchiveEx(&mut data as *mut _) }
@@ -257,15 +258,18 @@ impl OpenArchive {
             let buffer = unsafe { Vec::from_raw_parts(data.comment_buffer as *mut _,
                                                       data.comment_size as usize,
                                                       data.comment_buffer_size as usize) };
-            data.comment_buffer = std::ptr::null_mut();
+
+            data.comment_buffer = ptr::null_mut();
+            data.comment_buffer_w = ptr::null_mut();
 
             match data.comment_state {
                 0 => { // No comments
-                    debug_assert!(data.comment_size == 0);
+                    debug_assert_eq!(data.comment_size, 0);
                     None
                 },
                 1 => Some(CStr::from_bytes_with_nul(buffer.as_slice())?
                           .to_str()?.to_owned()),
+                // TODO: Could return truncated comment with error when ERAR_SMALL_BUF.
                 _ => return Err(UnrarError::from(Code::from(data.comment_state)
                                                  .unwrap_or(Code::Unknown),
                                                  When::ReadComment))

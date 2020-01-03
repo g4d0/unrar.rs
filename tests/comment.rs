@@ -17,4 +17,12 @@ fn archive_comment() {
 //     archive.enable_comments();
 //     let open_archive = archive.list().unwrap();
 //     assert_eq!(open_archive.comment().unwrap(), "abcdef12345\n");
+
+// #[test]
+// fn utf8_comment() {
+//     let mut archive = Archive::new("data/comment-utf8.rar");
+//     archive.enable_comments();
+//     let open_archive = archive.list().unwrap();
+//     assert!(open_archive.has_comment());
+//     assert_eq!(open_archive.comment().unwrap(), "te…―st✌\n");
 // }
