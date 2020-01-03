@@ -1,7 +1,10 @@
 use native;
+use widestring;
 use std::result::Result;
 use num::FromPrimitive;
 use std::fmt;
+use std::ffi;
+use std::str;
 
 enum_from_primitive! {
     #[derive(PartialEq, Eq, Debug, Clone, Copy)]
@@ -117,14 +120,14 @@ impl<T, C: widestring::UChar> From<widestring::NulError<C>> for UnrarError<T> {
     }
 }
 
-impl<T> From<std::ffi::FromBytesWithNulError> for UnrarError<T> {
-    fn from(_: std::ffi::FromBytesWithNulError) -> UnrarError<T> {
+impl<T> From<ffi::FromBytesWithNulError> for UnrarError<T> {
+    fn from(_: ffi::FromBytesWithNulError) -> UnrarError<T> {
         UnrarError::from(Code::Unknown, When::Open)
     }
 }
 
-impl<T> From<std::str::Utf8Error> for UnrarError<T> {
-    fn from(_: std::str::Utf8Error) -> UnrarError<T> {
+impl<T> From<str::Utf8Error> for UnrarError<T> {
+    fn from(_: str::Utf8Error) -> UnrarError<T> {
         UnrarError::from(Code::Unknown, When::Open)
     }
 }

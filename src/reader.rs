@@ -1,5 +1,6 @@
 use std::ptr::NonNull;
 use std::path::PathBuf;
+use std::ptr;
 
 use native;
 use crate::entry::*;
@@ -109,14 +110,14 @@ impl<'a> EntryHeader<'a> {
         let destination = if op == Operation::Extract {
             self.user_data.destination.as_ref()
                 .map(|x| x.as_ptr() as *const _)
-        } else { None }.unwrap_or(std::ptr::null());
+        } else { None }.unwrap_or(ptr::null());
 
         let process_result = Code::from(unsafe {
             native::RARProcessFileW(
                 self.handle.as_ptr(),
                 RAROperation::from(op) as i32,
                 destination,
-                std::ptr::null()
+                ptr::null()
             ) as u32
         }).unwrap();
 

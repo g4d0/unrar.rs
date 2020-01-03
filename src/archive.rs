@@ -7,6 +7,9 @@ use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::ffi::CStr;
 use std::iter::repeat;
+use std::panic::catch_unwind;
+use std::process::abort;
+use std::isize;
 use std::slice;
 use std::mem;
 use std::ptr;
@@ -442,7 +445,7 @@ impl OpenArchive {
     extern "system" fn callback(msg: native::UINT, user_data: native::LPARAM,
                                 p1: native::LPARAM, p2: native::LPARAM) -> c_int
     {
-        std::panic::catch_unwind(move || {
+        catch_unwind(move || {
             //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
             let ptr = user_data as *mut CallbackFn;
             assert!(!ptr.is_null());
@@ -452,7 +455,7 @@ impl OpenArchive {
             #[cfg(debug_assertions)]
             eprintln!("{:?}", _e);
 
-            std::process::abort();
+            abort();
         })
     }
 
@@ -488,9 +491,9 @@ impl OpenArchive {
                         assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
                         // This is an assert, because len this large would be
                         // extremely unusual (expected value is 128).
-                        assert!(len <= std::isize::MAX as usize,
+                        assert!(len <= isize::MAX as usize,
                                 "slice::from_raw_parts_mut expects length to be under {}, got {}",
-                                std::isize::MAX, len);
+                                isize::MAX, len);
 
                         // Our current expectation from the underlying unrar library.
                         debug_assert!(len == 128,
@@ -514,7 +517,7 @@ impl OpenArchive {
 
                         assert!(!ptr.is_null(), "Got null pointer to buffer with non-zero length");
                         // TODO: Pass a proper error message through user_data.
-                        if len > std::isize::MAX as usize { return -1 }
+                        if len > isize::MAX as usize { return -1 }
                         let bytes = unsafe { slice::from_raw_parts(ptr, len) };
 
                         vec.extend_from_slice(bytes);

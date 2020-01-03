@@ -1,9 +1,10 @@
-pub use streaming_iterator::StreamingIterator;
 use std::fmt;
 use std::cell::{Cell, UnsafeCell};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
 use std::path::PathBuf;
+
+pub use streaming_iterator::StreamingIterator;
 
 use native;
 use crate::entry::*;

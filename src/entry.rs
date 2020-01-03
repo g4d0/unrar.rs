@@ -1,10 +1,12 @@
+use native;
 use std::os::raw::c_uint;
 use std::path::{Path, PathBuf};
 use std::fmt;
+use std::mem;
 use widestring::WideCString;
 
 pub(crate) fn unpack_unp_size(unp_size: c_uint, unp_size_high: c_uint) -> usize {
-    (unp_size_high << std::mem::size_of::<c_uint>() | unp_size) as usize
+    (unp_size_high << mem::size_of::<c_uint>() | unp_size) as usize
 }
 
 bitflags! {
