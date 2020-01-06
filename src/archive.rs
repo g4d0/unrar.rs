@@ -215,7 +215,7 @@ impl<'a> Archive<'a> {
 // Used for passing data to and from the RARProcessFile callback, and to UnprocessedEntry.
 #[derive(Debug)]
 pub(crate) struct Shared {
-    pub destination: Option<WideCString>,
+    pub destination: RefCell<Option<WideCString>>,
     pub password: Option<WideCString>,
     pub volume: RefCell<Option<WideCString>>,
     pub bytes: RefCell<Option<Vec<u8>>>,
@@ -277,7 +277,7 @@ impl OpenArchive {
         // Also giving way the possibility of letting users of this library pass their own
         // closures as callbacks.
         let user_data = Rc::new(Shared {
-            destination,
+            destination: RefCell::new(destination),
             password,
             volume: RefCell::new(None),
             bytes: RefCell::new(None),

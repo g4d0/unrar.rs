@@ -1,5 +1,6 @@
 use std::ptr::NonNull;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use widestring::WideCString;
 use std::ptr;
 
 use native;
@@ -109,17 +110,13 @@ impl<'a> EntryHeader<'a> {
     }
 
     #[inline]
-    fn process(&self, op: Operation) -> UnrarResult<()> {
-        let destination = if op == Operation::Extract {
-            self.user_data.destination.as_ref()
-                .map(|x| x.as_ptr() as *const _)
-        } else { None }.unwrap_or(ptr::null());
-
+    fn process(&self, operation: Operation, destination: Option<&WideCString>) -> UnrarResult<()> {
         let process_result = Code::from(unsafe {
             native::RARProcessFileW(
                 self.handle.as_ptr(),
-                op as i32,
-                destination,
+                operation as i32,
+                destination.map(|x| x.as_ptr() as *const _)
+                    .unwrap_or(std::ptr::null()),
                 ptr::null()
             ) as u32
         }).unwrap();
@@ -147,8 +144,15 @@ impl<'a> EntryHeader<'a> {
     }
 
     #[inline]
-    fn process_entry(self, op: Operation) -> UnrarResult<Entry> {
-        let result = self.process(op);
+    fn process_entry(self, op: Operation, destination: Option<&WideCString>) -> UnrarResult<Entry> {
+        let default_destination = self.user_data.destination.borrow();
+        let dest =
+            if op == Operation::Extract {
+                destination.or_else(|| default_destination.as_ref())
+            } else { None };
+
+        let result = self.process(op, dest);
+
         self.entry.as_mut().unwrap().next_volume = self.next_volume();
         let entry = self.entry.take().unwrap();
         match result {
@@ -169,7 +173,7 @@ impl<'a> EntryHeader<'a> {
         self.user_data.bytes.borrow_mut()
             .replace(Vec::with_capacity(self.entry.as_ref().unwrap().unpacked_size()));
 
-        let result = self.process(Operation::Test);
+        let result = self.process(Operation::Test, None);
 
         self.entry.as_mut().unwrap().next_volume = self.next_volume();
         self.entry.as_mut().unwrap().bytes = match self.user_data.bytes.borrow_mut().take() {
@@ -186,17 +190,23 @@ impl<'a> EntryHeader<'a> {
 
     #[inline]
     pub fn test(self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Test)
+        self.process_entry(Operation::Test, None)
+    }
+
+    #[inline]
+    pub fn extract_to<P: AsRef<Path>>(self, destination: P) -> UnrarResult<Entry> {
+        let dest = Some(WideCString::from_os_str(destination.as_ref())?);
+        self.process_entry(Operation::Extract, dest.as_ref())
     }
 
     #[inline]
     pub fn extract(self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Extract)
+        self.process_entry(Operation::Extract, None)
     }
 
     #[inline]
     pub fn skip(self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Skip)
+        self.process_entry(Operation::Skip, None)
     }
 }
 

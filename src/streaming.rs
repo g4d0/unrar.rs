@@ -2,7 +2,8 @@ use std::fmt;
 use std::cell::{Cell, UnsafeCell};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use widestring::WideCString;
 
 pub use streaming_iterator::StreamingIterator;
 
@@ -123,19 +124,14 @@ impl<'a> UnprocessedEntry<'a> {
     }
 
     #[inline]
-    fn process(&self, op: Operation) -> UnrarResult<()> {
+    fn process(&self, operation: Operation, destination: Option<&WideCString>) -> UnrarResult<()> {
         // Make sure to mark current entry processed.
         self.is_processed.set(true);
-
-        let destination =
-            if op == Operation::Extract {
-                self.user_data.destination.as_ref()
-            } else { None };
 
         let process_result = Code::from(unsafe {
             native::RARProcessFileW(
                 self.handle.as_ptr(),
-                op as i32,
+                operation as i32,
                 destination.map(|x| x.as_ptr() as *const _)
                     .unwrap_or(std::ptr::null()),
                 std::ptr::null()
@@ -165,11 +161,11 @@ impl<'a> UnprocessedEntry<'a> {
     }
 
     #[inline]
-    fn process_entry(&self, op: Operation) -> UnrarResult<Entry> {
+    fn process_entry(&self, op: Operation, destination: Option<&WideCString>) -> UnrarResult<Entry> {
         let entry = unsafe { &mut *self.entry.get() };
         assert!(entry.is_some(), "Attempted to process already processed entry");
 
-        let result = self.process(op);
+        let result = self.process(op, destination);
 
         let mut entry = entry.take().unwrap();
         entry.next_volume = self.next_volume();
@@ -193,7 +189,7 @@ impl<'a> UnprocessedEntry<'a> {
         self.user_data.bytes.borrow_mut()
             .replace(Vec::with_capacity(entry.as_ref().unwrap().unpacked_size()));
 
-        let result = self.process(Operation::Test);
+        let result = self.process(Operation::Test, None);
 
         let mut entry = entry.take().unwrap();
         entry.next_volume = self.next_volume();
@@ -211,17 +207,25 @@ impl<'a> UnprocessedEntry<'a> {
     // TODO: Should these return Entry or ()?
     #[inline]
     pub fn test(&self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Test)
+        self.process_entry(Operation::Test, None)
     }
 
+    // TODO: extract_to(Path) and extract() or just extract(Option<Path>)?
     #[inline]
+    pub fn extract_to<P: AsRef<Path>>(&self, destination: P) -> UnrarResult<Entry> {
+        let dest = Some(WideCString::from_os_str(destination.as_ref())?);
+        self.process_entry(Operation::Extract, dest.as_ref())
+    }
+
+    /// Extract to default destination configured for [OpenArchive::extract_to](crate::archive::OpenArchive::extract_to),
+    /// or to current directory.
     pub fn extract(&self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Extract)
+        self.process_entry(Operation::Extract, self.user_data.destination.borrow().as_ref())
     }
 
     #[inline]
     pub fn skip(&self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Skip)
+        self.process_entry(Operation::Skip, None)
     }
 }
 

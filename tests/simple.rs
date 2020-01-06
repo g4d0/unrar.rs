@@ -38,3 +38,16 @@ fn version_cat() {
     file.read_to_string(&mut s).unwrap();
     assert_eq!(s, "unrar-0.4.0");
 }
+
+#[test]
+fn version_cat_entry_dest() {
+    let t = TempDir::new("unrar").unwrap();
+    Archive::new("data/version.rar")
+        .extract()
+        .unwrap()
+        .iter().for_each(|x| { x.as_ref().unwrap().extract_to(t.path()).unwrap(); });
+    let mut file = File::open(t.path().join("VERSION")).unwrap();
+    let mut s = String::new();
+    file.read_to_string(&mut s).unwrap();
+    assert_eq!(s, "unrar-0.4.0");
+}
