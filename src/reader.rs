@@ -41,11 +41,11 @@ impl OpenArchiveReader {
         if unproc.is_some() {
             let result = EntryHeader::new(&mut unproc,
                                           self.inner.handle,
-                                          self.inner.user_data.clone()).skip();
+                                          self.inner.shared.clone()).skip();
             if let Err(e) = result {
                 self.damaged = true;
-                self.inner.user_data.volume.borrow_mut().take();
-                self.inner.user_data.bytes.borrow_mut().take();
+                self.inner.shared.volume.borrow_mut().take();
+                self.inner.shared.bytes.borrow_mut().take();
                 return Some(Err(UnrarError::from(e.code, e.when)));
             }
         }
@@ -71,7 +71,7 @@ impl OpenArchiveReader {
 
         Some(Ok(EntryHeader::new(&mut self.current_header,
                                  self.inner.handle,
-                                 self.inner.user_data.clone())))
+                                 self.inner.shared.clone())))
     }
 }
 
@@ -90,7 +90,7 @@ pub struct EntryHeader<'a> {
     // gets taken out of the `Option`.
     entry: &'a mut Option<Entry>,
     handle: NonNull<native::HANDLE>,
-    user_data: SharedData,
+    shared: SharedData,
 }
 
 // NOTE: All functions yielding the inner Entry by value (e.g. by `take()`) _must_ consume self.
@@ -98,14 +98,14 @@ impl<'a> EntryHeader<'a> {
     /// `entry` _must_ be Some.
     fn new(entry: &'a mut Option<Entry>,
            handle: NonNull<native::HANDLE>,
-           user_data: SharedData,)
+           shared: SharedData)
            -> Self
     {
         assert!(entry.is_some(), "BUG: EntryHeader constructed with entry as None");
         Self {
             entry,
             handle,
-            user_data,
+            shared,
         }
     }
 
@@ -139,13 +139,13 @@ impl<'a> EntryHeader<'a> {
     // Only valid after process().
     #[inline]
     fn next_volume(&self) -> Option<PathBuf> {
-        self.user_data.volume.borrow_mut()
+        self.shared.volume.borrow_mut()
             .take().map(|x| PathBuf::from(x.to_os_string()))
     }
 
     #[inline]
     fn process_entry(self, op: Operation, destination: Option<&WideCString>) -> UnrarResult<Entry> {
-        let default_destination = self.user_data.destination.borrow();
+        let default_destination = self.shared.destination.borrow();
         let dest =
             if op == Operation::Extract {
                 destination.or_else(|| default_destination.as_ref())
@@ -170,13 +170,13 @@ impl<'a> EntryHeader<'a> {
         //
         // Max dictionary size is 4MB for RAR 3.x and 4.x,
         // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.
-        self.user_data.bytes.borrow_mut()
+        self.shared.bytes.borrow_mut()
             .replace(Vec::with_capacity(self.entry.as_ref().unwrap().unpacked_size()));
 
         let result = self.process(Operation::Test, None);
 
         self.entry.as_mut().unwrap().next_volume = self.next_volume();
-        self.entry.as_mut().unwrap().bytes = match self.user_data.bytes.borrow_mut().take() {
+        self.entry.as_mut().unwrap().bytes = match self.shared.bytes.borrow_mut().take() {
             Some(bytes) => Some(bytes),
             None => return Err(UnrarError::new(Code::Success, When::Process, self.entry.take().unwrap()))
         };

@@ -52,8 +52,8 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
                 let result = unproc.skip();
                 if let Err(e) = result {
                     self.damaged = true;
-                    self.inner.user_data.volume.borrow_mut().take();
-                    self.inner.user_data.bytes.borrow_mut().take();
+                    self.inner.shared.volume.borrow_mut().take();
+                    self.inner.shared.bytes.borrow_mut().take();
                     self.unprocessed_entry = Some(Err(UnrarError::from(e.code, e.when)));
                 }
             }
@@ -68,7 +68,7 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
             Code::Success => {
                  Some(Ok(UnprocessedEntry::new(Entry::from(header),
                                                self.inner.handle,
-                                               self.inner.user_data.clone())))
+                                               self.inner.shared.clone())))
             },
             Code::EndArchive => {
                 self.damaged = true;
@@ -102,7 +102,7 @@ pub struct UnprocessedEntry<'a> {
     // NOTE: Could be replaced with RefCell to remove uses of unsafe.
     entry: UnsafeCell<Option<Entry>>,
     handle: NonNull<native::HANDLE>,
-    user_data: SharedData,
+    shared: SharedData,
     // Remember that we're actually mutably borrowing OpenArchive here.
     marker: PhantomData<&'a mut OpenArchive>,
     is_processed: Cell<bool>,
@@ -111,14 +111,14 @@ pub struct UnprocessedEntry<'a> {
 impl<'a> UnprocessedEntry<'a> {
     fn new(entry: Entry,
            handle: NonNull<native::HANDLE>,
-           user_data: SharedData,)
+           shared: SharedData,)
            -> Self
     {
         Self {
             entry: UnsafeCell::new(Some(entry)),
             is_processed: Cell::new(false),
             handle,
-            user_data,
+            shared,
             marker: PhantomData,
         }
     }
@@ -156,7 +156,7 @@ impl<'a> UnprocessedEntry<'a> {
     // Only valid after process().
     #[inline]
     fn next_volume(&self) -> Option<PathBuf> {
-        self.user_data.volume.borrow_mut()
+        self.shared.volume.borrow_mut()
             .take().map(|x| PathBuf::from(x.to_os_string()))
     }
 
@@ -186,14 +186,14 @@ impl<'a> UnprocessedEntry<'a> {
         //
         // Max dictionary size is 4MB for RAR 3.x and 4.x,
         // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.
-        self.user_data.bytes.borrow_mut()
+        self.shared.bytes.borrow_mut()
             .replace(Vec::with_capacity(entry.as_ref().unwrap().unpacked_size()));
 
         let result = self.process(Operation::Test, None);
 
         let mut entry = entry.take().unwrap();
         entry.next_volume = self.next_volume();
-        entry.bytes = match self.user_data.bytes.borrow_mut().take() {
+        entry.bytes = match self.shared.bytes.borrow_mut().take() {
             Some(bytes) => Some(bytes),
             None => return Err(UnrarError::new(Code::Success, When::Process, entry))
         };
@@ -220,7 +220,7 @@ impl<'a> UnprocessedEntry<'a> {
     /// Extract to default destination configured for [OpenArchive::extract_to](crate::archive::OpenArchive::extract_to),
     /// or to current directory.
     pub fn extract(&self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Extract, self.user_data.destination.borrow().as_ref())
+        self.process_entry(Operation::Extract, self.shared.destination.borrow().as_ref())
     }
 
     #[inline]

@@ -246,7 +246,7 @@ pub struct OpenArchive {
     comment: Option<String>,
     flags: ArchiveFlags,
     // used to share data between processing and callback
-    pub(crate) user_data: SharedData,
+    pub(crate) shared: SharedData,
     callback_ptr: NonNull<CallbackFn>,
 }
 
@@ -276,13 +276,13 @@ impl OpenArchive {
         // making it easier to pass the real user data to the ProcessFile event handler function.
         // Also giving way the possibility of letting users of this library pass their own
         // closures as callbacks.
-        let user_data = Rc::new(Shared {
+        let shared = Rc::new(Shared {
             destination: RefCell::new(destination),
             password,
             volume: RefCell::new(None),
             bytes: RefCell::new(None),
         });
-        let user_data_ref = user_data.clone();
+        let user_data_ref = shared.clone();
         // Trait object -> Thin pointer -> Raw pointer
         let boxed_callback = Box::into_raw(Box::new(Box::new(Self::callback_handler(user_data_ref))
                                                     as CallbackFn));
@@ -333,10 +333,10 @@ impl OpenArchive {
 
         if let Some(handle) = handle {
             let archive = OpenArchive {
-                handle: handle,
-                comment: comment,
+                handle,
+                comment,
+                shared,
                 flags: ArchiveFlags::from_bits(data.flags).unwrap(),
-                user_data: user_data,
                 callback_ptr: NonNull::new(boxed_callback).unwrap(),
             };
 
@@ -541,7 +541,7 @@ impl Iterator for OpenArchiveListIter {
 
                         // EOpen on Process: Next volume not found
                         if process_result == Code::EOpen {
-                            entry.next_volume = self.inner.user_data.volume.borrow_mut()
+                            entry.next_volume = self.inner.shared.volume.borrow_mut()
                                 .take().map(|x| PathBuf::from(x.to_os_string()));
                             self.damaged = true;
                             Some(Err(UnrarError::new(process_result, When::Process, entry)))
