@@ -1,14 +1,12 @@
 extern crate unrar;
 
 use std::str;
-use unrar::Archive;
+use std::path::Path;
+use unrar::{Archive, Header, StreamingIterator};
 
 fn main() {
-    println!(
-        "{}",
-        str::from_utf8(&Archive::new("version.rar")
-            .read_entry_bytes("VERSION")
-            .unwrap())
-            .unwrap()
-    );
+    let mut iter = Archive::new("version.rar").extract().unwrap().iter();
+    let entry = iter.find(|x| x.as_ref().unwrap().filename() == Path::new("VERSION"))
+        .unwrap().as_ref().unwrap().read_bytes();
+    println!("{}", str::from_utf8(entry.unwrap().bytes().unwrap()).unwrap());
 }

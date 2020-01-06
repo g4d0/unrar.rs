@@ -32,7 +32,7 @@ fn list_missing_volume_streaming() {
                                       "src/lib.rs",
                                       "vendor/unrar/acknow.txt",
                                       "vendor/unrar/arccmt.cpp"].iter().map(|x| x.into()).collect();
-    let mut archive = Archive::new("data/archive.part1.rar").list().unwrap().iter();
+    let mut archive = Archive::new("data/archive.part1.rar").extract().unwrap().iter();
     let mut take = archive.by_ref().take(expected.len());
     let mut i = 0;
     while let Some(e) = take.next() {
@@ -55,7 +55,7 @@ fn list_missing_volume_reader() {
                                       "src/lib.rs",
                                       "vendor/unrar/acknow.txt",
                                       "vendor/unrar/arccmt.cpp"].iter().map(|x| x.into()).collect();
-    let mut archive = Archive::new("data/archive.part1.rar").list().unwrap().reader();
+    let mut archive = Archive::new("data/archive.part1.rar").extract().unwrap().reader();
     let mut i = 0;
     while let Some(e) = archive.read_next_header() {
         assert_eq!(e.unwrap().skip().unwrap().filename(), expected[i]);

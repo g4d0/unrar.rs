@@ -5,7 +5,7 @@ use std::ptr;
 use native;
 use crate::entry::*;
 use crate::error::*;
-use crate::archive::{RAROperation, SharedData, OpenArchive, Operation};
+use crate::archive::{SharedData, OpenArchive, Operation};
 
 pub struct OpenArchiveReader {
     inner: OpenArchive,
@@ -33,6 +33,9 @@ impl OpenArchiveReader {
         }
 
         // Skip if unprocessed.
+        // TODO: Could do this in EntryHeader drop().
+        //       Requires means of passing error message back (could/should use Shared),
+        //       which requires refactoring UnrarError.
         let mut unproc = self.current_header.take();
         if unproc.is_some() {
             let result = EntryHeader::new(&mut unproc,
@@ -115,7 +118,7 @@ impl<'a> EntryHeader<'a> {
         let process_result = Code::from(unsafe {
             native::RARProcessFileW(
                 self.handle.as_ptr(),
-                RAROperation::from(op) as i32,
+                op as i32,
                 destination,
                 ptr::null()
             ) as u32
@@ -159,6 +162,7 @@ impl<'a> EntryHeader<'a> {
         // Try to reserve the full unpacked size ahead of time.
         // Since apparently we can only read max dictionary size at a time
         // with the callback.
+        // TODO: Optionally, stream bytes in dictionary sized chunks.
         //
         // Max dictionary size is 4MB for RAR 3.x and 4.x,
         // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.

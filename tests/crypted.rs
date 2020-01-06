@@ -18,26 +18,15 @@ fn list() {
 #[test]
 fn list_streaming() {
     // No password needed in order to list contents
-    let mut entries = Archive::new("data/crypted.rar").list().unwrap().iter();
+    let mut entries = Archive::new("data/crypted.rar").extract().unwrap().iter();
     assert_eq!(entries.next().unwrap().as_ref().unwrap().filename(), PathBuf::from(".gitignore"));
 }
 
 #[test]
 fn list_reader() {
     // No password needed in order to list contents
-    let mut entries = Archive::new("data/crypted.rar").list().unwrap().reader();
+    let mut entries = Archive::new("data/crypted.rar").extract().unwrap().reader();
     assert_eq!(entries.read_next_header().unwrap().unwrap().filename(), PathBuf::from(".gitignore"));
-}
-
-#[test]
-fn no_password() {
-    let t = TempDir::new("unrar").unwrap();
-    let mut arc = Archive::new("data/crypted.rar")
-        .extract_to(t.path())
-        .unwrap().into_iter();
-    let err = arc.next().unwrap().unwrap_err();
-    assert_eq!(err.code, Code::MissingPassword);
-    assert_eq!(err.when, When::Process);
 }
 
 #[test]
@@ -68,8 +57,7 @@ fn version_cat() {
     Archive::with_password("data/crypted.rar", "unrar")
         .extract_to(t.path())
         .unwrap()
-        .process()
-        .unwrap();
+        .iter().for_each(|x| { x.as_ref().unwrap().extract().unwrap(); });
     let mut file = File::open(t.path().join(".gitignore")).unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
@@ -78,7 +66,7 @@ fn version_cat() {
 
 #[test]
 fn list_hp() {
-    let mut entries = Archive::with_password("data/hpw-password.rar", "password").list().unwrap().into_iter();
+    let mut entries = Archive::with_password("data/hpw-password.rar", "password").list().unwrap();
     assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from(".gitignore"));
 }
 
@@ -104,8 +92,7 @@ fn max_len_pw() {
     Archive::with_password("data/max-len-password.rar", &"x".repeat(127))
         .extract_to(t.path())
         .unwrap()
-        .process()
-        .unwrap();
+        .iter().for_each(|x| { x.as_ref().unwrap().extract().unwrap(); });
     let mut file = File::open(t.path().join(".gitignore")).unwrap();
     let mut s = String::new();
     file.read_to_string(&mut s).unwrap();
@@ -118,8 +105,8 @@ fn too_long_pw() {
     let mut entries = Archive::with_password("data/max-len-password.rar", &"x".repeat(128))
         .extract_to(t.path())
         .unwrap()
-        .into_iter();
-    let err = entries.next().unwrap().unwrap_err();
+        .iter();
+    let err = entries.next().unwrap().as_ref().unwrap().extract().unwrap_err();
     assert_eq!(err.code, Code::MissingPassword);
     assert_eq!(err.when, When::Process);
 }

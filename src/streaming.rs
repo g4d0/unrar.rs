@@ -9,7 +9,7 @@ pub use streaming_iterator::StreamingIterator;
 use native;
 use crate::entry::*;
 use crate::error::*;
-use crate::archive::{RAROperation, SharedData, OpenArchive, Operation};
+use crate::archive::{SharedData, OpenArchive, Operation};
 
 pub struct OpenArchiveStreamingIter<'a> {
     inner: OpenArchive,
@@ -98,6 +98,7 @@ pub struct UnprocessedEntry<'a> {
     // UnsafeCell used so that we can remove inner Entry without &mut.
     // StreamingIterator should prevent multiple instances of UnprocessedEntries
     // from existing, because each item borrows the iterator mutably.
+    // NOTE: Could be replaced with RefCell to remove uses of unsafe.
     entry: UnsafeCell<Option<Entry>>,
     handle: NonNull<native::HANDLE>,
     user_data: SharedData,
@@ -134,10 +135,10 @@ impl<'a> UnprocessedEntry<'a> {
         let process_result = Code::from(unsafe {
             native::RARProcessFileW(
                 self.handle.as_ptr(),
-                RAROperation::from(op) as i32,
+                op as i32,
                 destination.map(|x| x.as_ptr() as *const _)
-                    .unwrap_or(0 as *const _),
-                0 as *const _
+                    .unwrap_or(std::ptr::null()),
+                std::ptr::null()
             ) as u32
         }).unwrap();
 

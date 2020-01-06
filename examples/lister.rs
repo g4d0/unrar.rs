@@ -24,7 +24,7 @@ fn main() {
         // In this example, we are still going to use the archive and list its contents.
         Err(error @ UnrarError { data: Some(_), .. }) => {
             writeln!(&mut stderr, "Error: {}, continuing.", error).unwrap();
-            list_archive(error.data.unwrap());
+            list_archive(error.data.unwrap().into_iter());
         }
         // Irrecoverable failure, do nothing.
         Err(e) => {
@@ -33,10 +33,10 @@ fn main() {
     }
 
     // to be DRY, the archive function is here.
-    fn list_archive(archive: unrar::archive::OpenArchive) {
+    fn list_archive(archive: unrar::archive::OpenArchiveListIter) {
         // create a local copy of stderr.
         let mut stderr = std::io::stderr();
-        for entry in archive.into_iter() {
+        for entry in archive {
             match entry {
                 Ok(e) => println!("{}", e),
                 // EOpen @ process() means that next volume was not found / not readable.
