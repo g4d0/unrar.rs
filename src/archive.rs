@@ -2,6 +2,7 @@ use native;
 use widestring::WideCString;
 use regex::Regex;
 use std::os::raw::c_int;
+use std::fmt;
 use std::str;
 use std::isize;
 use std::slice;
@@ -9,6 +10,7 @@ use std::mem;
 use std::ptr;
 use std::panic;
 use std::process;
+use std::any;
 use std::borrow::Cow;
 use std::path::{Path, PathBuf};
 use std::ffi::CStr;
@@ -222,6 +224,12 @@ pub(crate) struct Shared {
     pub volume: Cell<Option<WideCString>>,
     // Bytes are written to this field over multiple calls of the callback.
     pub bytes: RefCell<Option<Vec<u8>>>,
+    // Stores _temporary_ pointer to a user provided closure for reading entry bytes.
+    // Care must be taken when using this, always make sure to replace the value before use.
+    // Also preferably drop after use.
+    pub bytes_closure: RefCell<Option<UnsafeBytesClosurePointer>>,
+    // Transports panics in user provided closure outside FFI boundary for use in `resume_unwind`.
+    pub bytes_closure_panic: Cell<Option<UnwindingPanic>>,
     // Transports errors in callback outside FFI boundary.
     pub callback_error: Cell<Option<ProvidedPasswordTooLong>>,
     // Transports fatal errors in callback outside FFI boundary so that we can try to panic.
@@ -235,6 +243,8 @@ impl fmt::Debug for Shared {
             .field("password", &self.password)
             .field("volume", &"<NextVolumeString>")
             .field("bytes", &self.bytes)
+            .field("bytes_closure", &self.bytes_closure)
+            .field("bytes_closure_panic", &"<BytesClosurePanic>")
             .field("callback_error", &self.callback_error)
             .field("callback_panic", &self.callback_panic)
             .finish()
@@ -243,6 +253,34 @@ impl fmt::Debug for Shared {
 
 pub(crate) type SharedData = Rc<Shared>;
 type CallbackFn = Box<dyn Fn(native::UINT, native::LPARAM, native::LPARAM) -> CallbackControl>;
+type BytesClosureFn = Box<dyn FnMut(&[u8]) -> CallbackControl>;
+type UnwindingPanic = Box<dyn any::Any + Send + 'static>;
+
+// Container for the user-provided closure pointer.
+#[derive(Debug)]
+pub(crate) struct UnsafeBytesClosurePointer(usize);
+impl UnsafeBytesClosurePointer {
+    pub fn new(callback: impl FnMut(&[u8]) -> CallbackControl) -> Self {
+        // Hackery to bypass the unecessary static lifetime limitation for the closure.
+        // Note: The casts are crucial!
+        let raw_ptr = Box::into_raw(Box::new(Box::new(callback)
+                                             as Box<dyn FnMut(&[u8]) -> CallbackControl>));
+        Self(raw_ptr as usize)
+    }
+
+    #[inline]
+    pub fn call(&mut self, bytes: &[u8]) -> CallbackControl {
+        let ptr = self.0 as *mut BytesClosureFn;
+        assert!(!ptr.is_null(), "Bytes closure pointer is null");
+        let f = unsafe { &mut *ptr };
+        f(bytes)
+    }
+}
+impl Drop for UnsafeBytesClosurePointer {
+    fn drop(&mut self) {
+        drop(unsafe { Box::from_raw(self.0 as *mut BytesClosureFn) });
+    }
+}
 
 /// Return value for controlling the processing callback.
 pub enum CallbackControl {
@@ -313,6 +351,8 @@ impl OpenArchive {
             password,
             volume: Cell::new(None),
             bytes: RefCell::new(None),
+            bytes_closure: RefCell::new(None),
+            bytes_closure_panic: Cell::new(None),
             callback_error: Cell::new(None),
             callback_panic: Cell::new(None),
         });
@@ -342,6 +382,7 @@ impl OpenArchive {
                                   as *mut _);
         let result = Code::from(data.open_result).unwrap();
 
+        debug_assert!(shared.bytes_closure_panic.take().is_none());
         if let Some(err) = shared.callback_panic.take() {
             panic!("{:?}[{:?}]: {:?}", When::Open, result, err);
         } else if let Some(err) = shared.callback_error.take() {
@@ -521,7 +562,16 @@ impl OpenArchive {
                     CallbackControl::Abort
                 },
                 native::UCM_PROCESSDATA if p2 > 0 => {
-                    if let Some(vec) = user_data.bytes.borrow_mut().as_mut() {
+                    let mut bytes_ref = match user_data.bytes.try_borrow_mut() {
+                        Ok(bytes_ref) => bytes_ref,
+                        Err(_) => return callback_panic(CallbackPanicKind::BytesBorrowed),
+                    };
+                    let mut closure_ref = match user_data.bytes_closure.try_borrow_mut() {
+                        Ok(closure_ref) => closure_ref,
+                        Err(_) => return callback_panic(CallbackPanicKind::BytesClosureBorrowed),
+                    };
+
+                    if let Some(vec) = bytes_ref.as_mut() {
                         let ptr = p1 as *const u8;
                         let len = p2 as usize;
 
@@ -535,6 +585,26 @@ impl OpenArchive {
 
                         let bytes = unsafe { slice::from_raw_parts(ptr, len) };
                         vec.extend_from_slice(bytes);
+                    } else if let Some(closure) = closure_ref.as_mut() {
+                        let ptr = p1 as *const u8;
+                        let len = p2 as usize;
+
+                        // Null data buffer with non-zero length (p2 > 0).
+                        if ptr.is_null() { return callback_panic(CallbackPanicKind::NullDataPointer); }
+
+                        // slice::from_raw_parts_mut expects length to be under isize::MAX.
+                        if len > isize::MAX as usize {
+                            return callback_panic(CallbackPanicKind::DataBufferTooLarge(len, isize::MAX));
+                        }
+
+                        let bytes = unsafe { slice::from_raw_parts(ptr, len) };
+
+                        let mut f = panic::AssertUnwindSafe(closure);
+                        return panic::catch_unwind(move || f.call(bytes))
+                            .unwrap_or_else(|err| {
+                                user_data.bytes_closure_panic.set(Some(Box::new(err)));
+                                CallbackControl::Abort
+                            });
                     }
                     CallbackControl::Continue
                 },
@@ -610,7 +680,12 @@ impl Iterator for OpenArchiveListIter {
                         }
                     },
                     _ => {
-                        if let Some(err) = self.shared.callback_panic.take() {
+                        if let Some(err) = self.shared.bytes_closure_panic.take() {
+                            // This should only occur after RARProcessFile(W) and with Code::Unknown.
+                            debug_assert_eq!(process_result, Code::Unknown,
+                                             "User closure panicked with an unusual process result");
+                            panic::resume_unwind(err);
+                        } else if let Some(err) = self.shared.callback_panic.take() {
                             panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
                         } else if let Some(err) = self.shared.callback_error.take() {
                             // FIXME: Could handle gracefully by returning the error.
@@ -625,6 +700,7 @@ impl Iterator for OpenArchiveListIter {
             },
             Code::EndArchive => None,
             _ => {
+                debug_assert!(self.shared.bytes_closure_panic.take().is_none());
                 if let Some(err) = self.shared.callback_panic.take() {
                     panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
                 } else if let Some(err) = self.shared.callback_error.take() {
@@ -643,6 +719,7 @@ impl Iterator for OpenArchiveListIter {
 impl Drop for OpenArchive {
     fn drop(&mut self) {
         unsafe { native::RARCloseArchive(self.handle.as_ptr()); }
+        debug_assert!(self.shared.bytes_closure_panic.take().is_none());
         debug_assert!(self.shared.callback_panic.take().is_none());
 
         let raw_ptr = self.callback_ptr.as_ptr() as *mut CallbackFn;

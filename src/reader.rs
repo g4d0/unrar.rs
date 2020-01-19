@@ -2,11 +2,12 @@ use std::ptr::NonNull;
 use std::path::{Path, PathBuf};
 use widestring::WideCString;
 use std::ptr;
+use std::panic;
 
 use native;
 use crate::entry::*;
 use crate::error::*;
-use crate::archive::{SharedData, OpenArchive, Operation};
+use crate::archive::{SharedData, OpenArchive, Operation, CallbackControl, UnsafeBytesClosurePointer};
 
 pub struct OpenArchiveReader {
     inner: OpenArchive,
@@ -64,6 +65,7 @@ impl OpenArchiveReader {
                 return None;
             },
             _ => {
+                debug_assert!(self.inner.shared.bytes_closure_panic.take().is_none());
                 if let Some(err) = self.inner.shared.callback_panic.take() {
                     panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
                 } else if let Some(err) = self.inner.shared.callback_error.take() {
@@ -139,7 +141,12 @@ impl<'a> EntryHeader<'a> {
                 }
             }
             _ => {
-                if let Some(err) = self.shared.callback_panic.take() {
+                if let Some(err) = self.shared.bytes_closure_panic.take() {
+                    // This should only occur after RARProcessFile(W) and with Code::Unknown.
+                    debug_assert_eq!(process_result, Code::Unknown,
+                                     "User closure panicked with an unusual process result");
+                    panic::resume_unwind(err);
+                } else if let Some(err) = self.shared.callback_panic.take() {
                     panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
                 } else if let Some(err) = self.shared.callback_error.take() {
                     // FIXME: Could handle gracefully by returning the error.
@@ -176,12 +183,41 @@ impl<'a> EntryHeader<'a> {
         }
     }
 
+    /// Collect entry bytes using a closure.
+    /// The amount of bytes read per call depends on the archive dictionary size.
+    ///
+    /// Max dictionary size is expected to be 4MB for RAR 3 and 4,
+    /// and 256MB (for 32bit) or 1GB (for 64bit) for RAR 5.0.
+    ///
+    /// # Safety
+    /// Closure is assumed to be `UnwindSafe` using `AssertUnwindSafe`. Practically this means that
+    /// any changes to external state made in the closure will be retained, when a panic is caught.
+    pub fn read_bytes_with<'b>(self, f: impl FnMut(&[u8]) -> CallbackControl + 'b) -> UnrarResult<Entry> {
+        // This ought to be safe as long as we ensure that the closure pointer gets dropped
+        // somewhere during this function.
+        //
+        // The closure is boxed and cast into thin pointer, letting us bypass any lifetime
+        // restrictions when storing the function in `shared.bytes_closure`.
+        self.shared.bytes_closure.borrow_mut().replace(UnsafeBytesClosurePointer::new(f));
+
+        let result = self.process(Operation::Test, None);
+
+        // Important: Ensures the (unsafe) function pointer gets dropped.
+        self.shared.bytes_closure.borrow_mut().take();
+
+        self.entry.as_mut().unwrap().next_volume = self.next_volume();
+        let entry = self.entry.take().unwrap();
+        match result {
+            Ok(_) => Ok(entry),
+            Err(e) => Err(UnrarError::new(e.code, e.when, entry))
+        }
+    }
+
     // TODO: Should this return Entry or Vec<u8>?
     pub fn read_bytes(self) -> UnrarResult<Entry> {
         // Try to reserve the full unpacked size ahead of time.
         // Since apparently we can only read max dictionary size at a time
         // with the callback.
-        // TODO: Optionally, stream bytes in dictionary sized chunks.
         //
         // Max dictionary size is 4MB for RAR 3.x and 4.x,
         // and 256MB (32bit) or 1GB (64bit) for RAR 5.0.

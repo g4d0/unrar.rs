@@ -142,6 +142,8 @@ pub enum CallbackPanicKind {
     VolumeMissingNul,
     AnomalousPasswordLength(usize, isize),
     DataBufferTooLarge(usize, isize),
+    BytesBorrowed,
+    BytesClosureBorrowed,
 }
 
 impl fmt::Display for CallbackPanicKind {
@@ -166,6 +168,12 @@ impl fmt::Display for CallbackPanicKind {
             CallbackPanicKind::DataBufferTooLarge(length, max) => {
                 write!(f, "data buffer larger than allowed ({}), should be less than {}",
                        length, max)
+            },
+            CallbackPanicKind::BytesBorrowed => {
+                write!(f, "trying to get multiple mutable borrows of the shared bytes buffer")
+            },
+            CallbackPanicKind::BytesClosureBorrowed => {
+                write!(f, "trying to get multiple mutable borrows of the shared bytes closure")
             }
         }
     }

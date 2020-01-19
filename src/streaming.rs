@@ -77,6 +77,7 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
                 None
             },
             _ => {
+                debug_assert!(self.inner.shared.bytes_closure_panic.take().is_none());
                 if let Some(err) = self.inner.shared.callback_panic.take() {
                     panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
                 } else if let Some(err) = self.inner.shared.callback_error.take() {
@@ -158,7 +159,12 @@ impl<'a> UnprocessedEntry<'a> {
                 }
             }
             _ => {
-                if let Some(err) = self.shared.callback_panic.take() {
+                if let Some(err) = self.shared.bytes_closure_panic.take() {
+                    // This should only occur after RARProcessFile(W) and with Code::Unknown.
+                    debug_assert_eq!(process_result, Code::Unknown,
+                                     "User closure panicked with an unusual process result");
+                    panic::resume_unwind(err);
+                } else if let Some(err) = self.shared.callback_panic.take() {
                     panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
                 } else if let Some(err) = self.shared.callback_error.take() {
                     // FIXME: Could handle gracefully by returning the error.
