@@ -44,7 +44,7 @@ impl OpenArchiveReader {
                                           self.inner.shared.clone()).skip();
             if let Err(e) = result {
                 self.damaged = true;
-                self.inner.shared.volume.borrow_mut().take();
+                self.inner.shared.volume.take();
                 self.inner.shared.bytes.borrow_mut().take();
                 return Some(Err(UnrarError::from(e.code, e.when)));
             }
@@ -64,6 +64,14 @@ impl OpenArchiveReader {
                 return None;
             },
             _ => {
+                if let Some(err) = self.inner.shared.callback_panic.take() {
+                    panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
+                } else if let Some(err) = self.inner.shared.callback_error.take() {
+                    // FIXME: Could handle gracefully by returning the error.
+                    //return Some(Err(Error::from_callback(err, When::Read)))
+                    panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
+                }
+
                 self.damaged = true;
                 return Some(Err(UnrarError::from(read_result, When::Read)))
             }
@@ -131,30 +139,37 @@ impl<'a> EntryHeader<'a> {
                 }
             }
             _ => {
+                if let Some(err) = self.shared.callback_panic.take() {
+                    panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
+                } else if let Some(err) = self.shared.callback_error.take() {
+                    // FIXME: Could handle gracefully by returning the error.
+                    //return Some(Err(Error::from_callback(err, When::Process)))
+                    panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
+                }
+
                 Err(UnrarError::from(process_result, When::Process))
             }
         }
     }
 
-    // Only valid after process().
+    // Only valid _once_ after process().
     #[inline]
     fn next_volume(&self) -> Option<PathBuf> {
-        self.shared.volume.borrow_mut()
-            .take().map(|x| PathBuf::from(x.to_os_string()))
+        self.shared.volume.take().map(|x| PathBuf::from(x.to_os_string()))
     }
 
     #[inline]
     fn process_entry(self, op: Operation, destination: Option<&WideCString>) -> UnrarResult<Entry> {
-        let default_destination = self.shared.destination.borrow();
+        let default_destination = self.shared.destination.as_ref();
         let dest =
             if op == Operation::Extract {
-                destination.or_else(|| default_destination.as_ref())
+                destination.or_else(|| default_destination)
             } else { None };
 
         let result = self.process(op, dest);
 
-        self.entry.as_mut().unwrap().next_volume = self.next_volume();
-        let entry = self.entry.take().unwrap();
+        let mut entry = self.entry.take().unwrap();
+        entry.next_volume = self.next_volume();
         match result {
             Ok(_) => Ok(entry),
             Err(e) => Err(UnrarError::new(e.code, e.when, entry))
@@ -175,13 +190,13 @@ impl<'a> EntryHeader<'a> {
 
         let result = self.process(Operation::Test, None);
 
-        self.entry.as_mut().unwrap().next_volume = self.next_volume();
-        self.entry.as_mut().unwrap().bytes = match self.shared.bytes.borrow_mut().take() {
+        let mut entry = self.entry.take().unwrap();
+        entry.next_volume = self.next_volume();
+        entry.bytes = match self.shared.bytes.borrow_mut().take() {
             Some(bytes) => Some(bytes),
             None => return Err(UnrarError::new(Code::Success, When::Process, self.entry.take().unwrap()))
         };
 
-        let entry = self.entry.take().unwrap();
         match result {
             Ok(_) => Ok(entry),
             Err(e) => Err(UnrarError::new(e.code, e.when, entry))

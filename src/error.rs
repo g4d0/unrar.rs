@@ -4,6 +4,7 @@ use std::result::Result;
 use num::FromPrimitive;
 use std::fmt;
 use std::ffi;
+use std::error;
 use std::str;
 
 enum_from_primitive! {
@@ -129,5 +130,80 @@ impl<T> From<ffi::FromBytesWithNulError> for UnrarError<T> {
 impl<T> From<str::Utf8Error> for UnrarError<T> {
     fn from(_: str::Utf8Error) -> UnrarError<T> {
         UnrarError::from(Code::Unknown, When::Open)
+    }
+}
+
+
+#[derive(Debug, Clone, Copy)]
+pub enum CallbackPanicKind {
+    NullVolume,
+    NullPassword,
+    NullDataPointer,
+    VolumeMissingNul,
+    AnomalousPasswordLength(usize, isize),
+    DataBufferTooLarge(usize, isize),
+}
+
+impl fmt::Display for CallbackPanicKind {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match *self {
+            CallbackPanicKind::NullVolume => {
+                write!(f, "pointer to next volume buffer is null")
+            },
+            CallbackPanicKind::NullPassword => {
+                write!(f, "pointer to password buffer is null")
+            },
+            CallbackPanicKind::NullDataPointer => {
+                write!(f, "pointer to data buffer is null")
+            },
+            CallbackPanicKind::VolumeMissingNul => {
+                write!(f, "next volume string is missing nul terminator")
+            },
+            CallbackPanicKind::AnomalousPasswordLength(length, max) => {
+                write!(f, "unusually large password buffer length ({}), should be less than {}",
+                       length, max)
+            },
+            CallbackPanicKind::DataBufferTooLarge(length, max) => {
+                write!(f, "data buffer larger than allowed ({}), should be less than {}",
+                       length, max)
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct CallbackPanic(CallbackPanicKind);
+
+impl CallbackPanic {
+    pub fn new(kind: CallbackPanicKind) -> Self {
+        Self(kind)
+    }
+
+    pub fn kind(&self) -> &CallbackPanicKind {
+        &self.0
+    }
+}
+
+
+/// User provided password was longer than what is supported by unrar.
+#[derive(Debug, Clone, Copy)]
+pub struct ProvidedPasswordTooLong(usize, usize);
+impl ProvidedPasswordTooLong {
+    pub fn new(length: usize, expected: usize) -> Self {
+        ProvidedPasswordTooLong(length, expected)
+    }
+}
+
+impl fmt::Display for ProvidedPasswordTooLong {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}: length {}, expected less than or equal to {}",
+               error::Error::description(self),
+               self.0, self.1)
+    }
+}
+
+impl error::Error for ProvidedPasswordTooLong {
+    fn description(&self) -> &str {
+        "password too long"
     }
 }

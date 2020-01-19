@@ -1,5 +1,6 @@
 use std::fmt;
 use std::ptr;
+use std::panic;
 use std::cell::{Cell, UnsafeCell};
 use std::marker::PhantomData;
 use std::ptr::NonNull;
@@ -40,7 +41,7 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
     }
 
     #[inline]
-    fn advance(&mut self)  {
+    fn advance(&mut self) {
         // The damaged flag was set, don't attempt to read any further, stop
         if self.damaged {
             self.unprocessed_entry = None;
@@ -53,7 +54,7 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
                 let result = unproc.skip();
                 if let Err(e) = result {
                     self.damaged = true;
-                    self.inner.shared.volume.borrow_mut().take();
+                    self.inner.shared.volume.take();
                     self.inner.shared.bytes.borrow_mut().take();
                     self.unprocessed_entry = Some(Err(UnrarError::from(e.code, e.when)));
                 }
@@ -67,15 +68,23 @@ impl<'a> StreamingIterator for OpenArchiveStreamingIter<'a> {
 
         self.unprocessed_entry = match read_result {
             Code::Success => {
-                 Some(Ok(UnprocessedEntry::new(Entry::from(header),
-                                               self.inner.handle,
-                                               self.inner.shared.clone())))
+                Some(Ok(UnprocessedEntry::new(Entry::from(header),
+                                              self.inner.handle,
+                                              self.inner.shared.clone())))
             },
             Code::EndArchive => {
                 self.damaged = true;
                 None
             },
             _ => {
+                if let Some(err) = self.inner.shared.callback_panic.take() {
+                    panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
+                } else if let Some(err) = self.inner.shared.callback_error.take() {
+                    // FIXME: Could handle gracefully by returning the error.
+                    //return Some(Err(Error::from_callback(err, When::Read)))
+                    panic!("{:?}[{:?}]: {:?}", When::Read, read_result, err);
+                }
+
                 self.damaged = true;
                 Some(Err(UnrarError::from(read_result, When::Read)))
             }
@@ -149,16 +158,23 @@ impl<'a> UnprocessedEntry<'a> {
                 }
             }
             _ => {
+                if let Some(err) = self.shared.callback_panic.take() {
+                    panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
+                } else if let Some(err) = self.shared.callback_error.take() {
+                    // FIXME: Could handle gracefully by returning the error.
+                    //return Some(Err(Error::from_callback(err, When::Process)))
+                    panic!("{:?}[{:?}]: {:?}", When::Process, process_result, err);
+                }
+
                 Err(UnrarError::from(process_result, When::Process))
             }
         }
     }
 
-    // Only valid after process().
+    // Only valid _once_ after process().
     #[inline]
     fn next_volume(&self) -> Option<PathBuf> {
-        self.shared.volume.borrow_mut()
-            .take().map(|x| PathBuf::from(x.to_os_string()))
+        self.shared.volume.take().map(|x| PathBuf::from(x.to_os_string()))
     }
 
     #[inline]
@@ -221,7 +237,7 @@ impl<'a> UnprocessedEntry<'a> {
     /// Extract to default destination configured for [OpenArchive::extract_to](crate::archive::OpenArchive::extract_to),
     /// or to current directory.
     pub fn extract(&self) -> UnrarResult<Entry> {
-        self.process_entry(Operation::Extract, self.shared.destination.borrow().as_ref())
+        self.process_entry(Operation::Extract, self.shared.destination.as_ref())
     }
 
     #[inline]

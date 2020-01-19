@@ -106,13 +106,14 @@ fn max_len_pw() {
 }
 
 #[test]
+#[should_panic(expected = "Process[MissingPassword]: ProvidedPasswordTooLong(129, 128)")]
 fn too_long_pw() {
     let t = TempDir::new("unrar").unwrap();
     let mut entries = Archive::with_password("data/max-len-password.rar", &"x".repeat(128))
         .extract_to(t.path())
         .unwrap()
         .iter();
-    let err = entries.next().unwrap().as_ref().unwrap().extract().unwrap_err();
-    assert_eq!(err.code, Code::MissingPassword);
-    assert_eq!(err.when, When::Process);
+    let _err = entries.next().unwrap().as_ref().unwrap().extract(); //.unwrap_err();
+    // assert_eq!(err.code, Code::MissingPassword);
+    // assert_eq!(err.when, When::Process);
 }
