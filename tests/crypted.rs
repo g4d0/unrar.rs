@@ -65,25 +65,31 @@ fn version_cat() {
 }
 
 #[test]
-fn list_hp() {
-    let mut entries = Archive::with_password("data/hpw-password.rar", "password").list().unwrap();
+fn list_encrypted_headers() {
+    let mut entries = Archive::with_password("data/comment-hpw-password.rar", "password").list().unwrap();
     assert_eq!(entries.next().unwrap().unwrap().filename(), PathBuf::from(".gitignore"));
 }
 
 #[test]
-fn no_password_list_hp() {
-    // Password needed in order to list contents, when both header and contents encrypted.
-    let err = Archive::new("data/hpw-password.rar").list().unwrap_err();
+fn no_password_list_encrypted_headers() {
+    // Password needed in order to list contents
+    let err = Archive::new("data/comment-hpw-password.rar").list().unwrap_err();
     assert_eq!(err.code, Code::MissingPassword);
     assert_eq!(err.when, When::Open);
     assert!(err.data.is_none());
 }
 
 #[test]
-fn list_enc_headers_no_pw() {
-    let err = Archive::new("data/utf8-password-encheader.rar").list().unwrap_err();
-    assert_eq!(err.code, Code::MissingPassword);
-    assert_eq!(err.when, When::Open);
+fn extract_encrypted_headers() {
+    let t = TempDir::new("unrar").unwrap();
+    Archive::with_password("data/comment-hpw-password.rar", "password")
+        .extract_to(t.path())
+        .unwrap()
+        .iter().for_each(|x| { x.as_ref().unwrap().extract().unwrap(); });
+    let mut file = File::open(t.path().join(".gitignore")).unwrap();
+    let mut s = String::new();
+    file.read_to_string(&mut s).unwrap();
+    assert_eq!(s, "target\nCargo.lock\n");
 }
 
 #[test]
