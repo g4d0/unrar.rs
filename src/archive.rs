@@ -487,13 +487,11 @@ impl OpenArchive {
         panic::catch_unwind(move || {
             //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
             let ptr = user_data as *mut CallbackFn;
-            assert!(!ptr.is_null());
+            assert!(!ptr.is_null(), "Callback function pointer is null");
             let f = unsafe { &mut *ptr };
             f(msg, p1, p2) as c_int
-        }).unwrap_or_else(|e| {
-            #[cfg(debug_assertions)]
-            eprintln!("{:?}", e);
-
+        }).unwrap_or_else(|_| {
+            // Abort on panic, any panics that end up here ought to be bugs.
             process::abort();
         })
     }
@@ -511,6 +509,8 @@ impl OpenArchive {
             match msg {
                 native::UCM_CHANGEVOLUMEW => {
                     let ptr = p1 as *const native::WCHAR;
+
+                    // Prevent from_ptr_with_nul from panicking.
                     if ptr.is_null() { return callback_panic(CallbackPanicKind::NullVolume); }
 
                     // 2048 seems to be the buffer size in unrar,
