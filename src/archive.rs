@@ -20,6 +20,7 @@ use std::boxed::Box;
 use std::rc::Rc;
 use std::cell::{Cell, RefCell};
 use std::ops::Deref;
+use std::convert::TryInto;
 
 use crate::error::*;
 use crate::entry::*;
@@ -265,11 +266,13 @@ impl UnsafeBytesClosurePointer {
         // Note: The casts are crucial!
         let raw_ptr = Box::into_raw(Box::new(Box::new(callback)
                                              as Box<dyn FnMut(&[u8]) -> CallbackControl>));
+        debug_assert_eq!(mem::size_of_val(&raw_ptr), mem::size_of::<usize>());
         Self(raw_ptr as usize)
     }
 
     #[inline]
     pub fn call(&mut self, bytes: &[u8]) -> CallbackControl {
+        debug_assert_eq!(mem::size_of_val(&self.0), mem::size_of::<*mut BytesClosureFn>());
         let ptr = self.0 as *mut BytesClosureFn;
         assert!(!ptr.is_null(), "Bytes closure pointer is null");
         let f = unsafe { &mut *ptr };
@@ -374,9 +377,11 @@ impl OpenArchive {
                              "Comment buffer should be 256kb");
 
             // TODO: Couldn't figure out how to use data.comment_buffer_w (access violation).
+            debug_assert_eq!(mem::size_of_val(&ptr), mem::size_of_val(&data.comment_buffer),
+                             "Comment buffer ptr size does not match the unrar_sys comment_buffer size.");
             data.comment_buffer = ptr as *mut _;
             data.comment_buffer_w = ptr::null_mut();
-            data.comment_buffer_size = cap as _;
+            data.comment_buffer_size = cap.try_into()?;
         }
 
         let handle = NonNull::new(unsafe { native::RAROpenArchiveEx(&mut data as *mut _) }
@@ -395,8 +400,8 @@ impl OpenArchive {
         let comment = if read_comments {
             assert!(data.comment_size <= data.comment_buffer_size);
             let buffer = unsafe { Vec::from_raw_parts(data.comment_buffer as *mut _,
-                                                      data.comment_size as usize,
-                                                      data.comment_buffer_size as usize) };
+                                                      data.comment_size.try_into()?,
+                                                      data.comment_buffer_size.try_into()?) };
 
             data.comment_buffer = ptr::null_mut();
             data.comment_buffer_w = ptr::null_mut();

@@ -133,6 +133,12 @@ impl<T> From<str::Utf8Error> for UnrarError<T> {
     }
 }
 
+impl<T> From<std::num::TryFromIntError> for UnrarError<T> {
+    fn from(_: std::num::TryFromIntError) -> UnrarError<T> {
+        UnrarError::from(Code::Unknown, When::Open)
+    }
+}
+
 
 #[derive(Debug, Clone, Copy)]
 pub enum CallbackPanicKind {
