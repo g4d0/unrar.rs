@@ -66,8 +66,9 @@ impl fmt::Display for Entry {
 
 impl From<native::HeaderDataEx> for Entry {
     fn from(header: native::HeaderDataEx) -> Self {
-        let filename = unsafe { WideCString::from_ptr_with_nul(header.filename_w.as_ptr()
-                                                               as *const _, 1024) }.unwrap();
+        let filename = unsafe {
+            WideCString::from_ptr_truncate(header.filename_w.as_ptr() as *const _, 1024)
+        };
 
         Entry {
             filename: PathBuf::from(filename.to_os_string()),

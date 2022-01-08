@@ -115,8 +115,8 @@ impl<T> UnrarError<T> {
 pub type UnrarResult<T> = Result<T, UnrarError<T>>;
 
 // TODO: Add proper error for these
-impl<T, C: widestring::UChar> From<widestring::NulError<C>> for UnrarError<T> {
-    fn from(_: widestring::NulError<C>) -> UnrarError<T> {
+impl<T, C: widestring::UChar> From<widestring::error::ContainsNul<C>> for UnrarError<T> {
+    fn from(_: widestring::error::ContainsNul<C>) -> UnrarError<T> {
         UnrarError::from(Code::Unknown, When::Open)
     }
 }
@@ -145,7 +145,6 @@ pub enum CallbackPanicKind {
     NullVolume,
     NullPassword,
     NullDataPointer,
-    VolumeMissingNul,
     AnomalousPasswordLength(usize, isize),
     DataBufferTooLarge(usize, isize),
     BytesBorrowed,
@@ -163,9 +162,6 @@ impl fmt::Display for CallbackPanicKind {
             },
             CallbackPanicKind::NullDataPointer => {
                 write!(f, "pointer to data buffer is null")
-            },
-            CallbackPanicKind::VolumeMissingNul => {
-                write!(f, "next volume string is missing nul terminator")
             },
             CallbackPanicKind::AnomalousPasswordLength(length, max) => {
                 write!(f, "unusually large password buffer length ({}), should be less than {}",

@@ -521,11 +521,8 @@ impl OpenArchive {
 
                     // 2048 seems to be the buffer size in unrar,
                     // also it's the maximum path length since 5.00.
-                    if let Ok(next) = unsafe { WideCString::from_ptr_with_nul(ptr as *const _, 2048) } {
-                        user_data.volume.set(Some(next));
-                    } else {
-                        return callback_panic(CallbackPanicKind::VolumeMissingNul);
-                    }
+                    let next = unsafe { WideCString::from_ptr_truncate(ptr as *const _, 2048) };
+                    user_data.volume.set(Some(next));
 
                     match p2 {
                         // Next volume not found.
@@ -815,10 +812,6 @@ mod tests {
         assert_eq!(err.when, When::Open);
 
         let err = Archive::with_password("archive.rar", "un\0rar").list().unwrap_err();
-        assert_eq!(err.code, Code::Unknown);
-        assert_eq!(err.when, When::Open);
-
-        let err = Archive::new("archive.rar").extract_to("tmp/\0").unwrap_err();
         assert_eq!(err.code, Code::Unknown);
         assert_eq!(err.when, When::Open);
     }

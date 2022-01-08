@@ -11,9 +11,9 @@ repository = "https://github.com/muja/unrar.rs"
 regex = "1"
 lazy_static = "1"
 enum_primitive = "0.1"
-num = "0.1"
+num = "0.4"
 bitflags = "1"
-widestring = "0.4"
+widestring = "0.5"
 streaming-iterator = "0.1"
 
 [dependencies.unrar_sys]
