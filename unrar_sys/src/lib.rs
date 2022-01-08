@@ -5,7 +5,7 @@ extern crate std;
 
 extern crate libc;
 
-#[cfg(all(windows, target_env = "msvc"))]
+#[cfg(all(windows))]
 extern crate winapi;
 
 #[cfg(feature = "std")]
@@ -18,7 +18,7 @@ use libc::{c_int, c_uint, wchar_t, c_uchar, c_char};
 
 // ----------------- ENV SPECIFIC ----------------- //
 
-#[cfg(all(windows, target_env = "msvc"))]
+#[cfg(all(windows))]
 mod env {
     pub use {
         winapi::shared::minwindef::{LPARAM, UINT},
@@ -26,7 +26,7 @@ mod env {
     };
 }
 
-#[cfg(not(all(windows, target_env = "msvc")))]
+#[cfg(not(all(windows)))]
 mod env {
     use super::*;
 

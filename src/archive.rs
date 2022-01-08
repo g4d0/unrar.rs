@@ -358,8 +358,9 @@ impl OpenArchive {
         });
         let user_data_ref = shared.clone();
         // Trait object -> Thin pointer -> Raw pointer
-        let boxed_callback = Box::into_raw(Box::new(Box::new(Self::callback_handler(user_data_ref))
-                                                    as CallbackFn));
+        let boxed_callback: *mut CallbackFn = Box::into_raw(Box::new(Box::new(Self::callback_handler(user_data_ref))));
+        debug_assert_eq!(mem::size_of_val(&boxed_callback), mem::size_of_val(&data.user_data),
+                         "unrar_sys::LPARAM must match callback pointer size.");
         data.user_data = boxed_callback as native::LPARAM;
         data.callback = Some(Self::callback);
 
@@ -485,7 +486,7 @@ impl OpenArchive {
                                 p1: native::LPARAM, p2: native::LPARAM) -> c_int
     {
         panic::catch_unwind(move || {
-            //println!("msg: {}, user_data: {}, p1: {}, p2: {}", msg, user_data, p1, p2);
+            // println!("msg: {}, user_data: {:x}, p1: {:x}, p2: {}", msg, user_data, p1, p2);
             let ptr = user_data as *mut CallbackFn;
             assert!(!ptr.is_null(), "Callback function pointer is null");
             let f = unsafe { &mut *ptr };
@@ -722,7 +723,7 @@ impl Drop for OpenArchive {
         debug_assert!(self.shared.bytes_closure_panic.take().is_none());
         debug_assert!(self.shared.callback_panic.take().is_none());
 
-        let raw_ptr = self.callback_ptr.as_ptr() as *mut CallbackFn;
+        let raw_ptr: *mut CallbackFn = self.callback_ptr.as_ptr();
         drop(unsafe { Box::from_raw(raw_ptr) });
     }
 }
