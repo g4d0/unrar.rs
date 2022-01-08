@@ -521,7 +521,6 @@ size_t Archive::ReadHeader15()
     {
       // Last 7 bytes of recovered volume can contain zeroes, because
       // REV files store its own information (volume number, etc.) here.
-      SaveFilePos SavePos(*this);
       int64 Length=Tell();
       Seek(Length-7,SEEK_SET);
       Recovered=true;
@@ -559,6 +558,13 @@ size_t Archive::ReadHeader50()
     return 0;
 #else
 
+    if (Cmd->SkipEncrypted)
+    {
+      uiMsg(UIMSG_SKIPENCARC,FileName);
+      FailedHeaderDecryption=true; // Suppress error messages and quit quietly.
+      return 0;
+    }
+
     byte HeadersInitV[SIZE_INITV];
     if (Read(HeadersInitV,SIZE_INITV)!=SIZE_INITV)
     {
@@ -584,7 +590,7 @@ size_t Archive::ReadHeader50()
         {
           // This message is used by Android GUI to reset cached passwords.
           // Update appropriate code if changed.
-          uiMsg(UIERROR_BADPSW,FileName);
+          uiMsg(UIERROR_BADPSW,FileName,FileName);
           FailedHeaderDecryption=true;
           ErrHandler.SetErrorCode(RARX_BADPWD);
           return 0;
@@ -593,7 +599,7 @@ size_t Archive::ReadHeader50()
         {
           // This message is used by Android GUI and Windows GUI and SFX to
           // reset cached passwords. Update appropriate code if changed.
-          uiMsg(UIWAIT_BADPSW,FileName);
+          uiMsg(UIWAIT_BADPSW,FileName,FileName);
           Cmd->Password.Clean();
         }
 
@@ -786,7 +792,7 @@ size_t Archive::ReadHeader50()
     case HEAD_SERVICE:
       {
         FileHeader *hd=ShortBlock.HeaderType==HEAD_FILE ? &FileHead:&SubHead;
-        hd->Reset();
+        hd->Reset(); // Clear hash, time fields and other stuff like flags.
         *(BaseBlock *)hd=ShortBlock;
 
         bool FileBlock=ShortBlock.HeaderType==HEAD_FILE;
@@ -877,7 +883,12 @@ size_t Archive::ReadHeader50()
         // code to shell extension, which is not done now.
         if (!FileBlock && hd->CmpName(SUBHEAD_TYPE_RR) && hd->SubData.Size()>0)
         {
-          RecoveryPercent=hd->SubData[0];
+          // It is stored as a single byte up to RAR 6.02 and as vint since
+          // 6.10, where we extended the maximum RR size from 99% to 1000%.
+          RawRead RawPercent;
+          RawPercent.Read(&hd->SubData[0],hd->SubData.Size());
+          RecoveryPercent=(int)RawPercent.GetV();
+
           RSBlockHeader Header;
           GetRRInfo(this,&Header);
           RecoverySize=Header.RecSectionSize*Header.RecCount;
@@ -1263,6 +1274,7 @@ size_t Archive::ReadHeader14()
     IntToExt(FileName,FileName,ASIZE(FileName));
     CharToWide(FileName,FileHead.FileName,ASIZE(FileHead.FileName));
     ConvertNameCase(FileHead.FileName);
+    ConvertFileHeader(&FileHead);
 
     if (Raw.Size()!=0)
       NextBlockPos=CurBlockPos+FileHead.HeadSize+FileHead.PackSize;
