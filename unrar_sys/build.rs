@@ -1,16 +1,6 @@
 extern crate cc;
 
 fn main() {
-    if cfg!(windows) {
-        println!("cargo:rustc-flags=-lpowrprof");
-        println!("cargo:rustc-link-lib=shell32");
-        if cfg!(target_env = "gnu") {
-            println!("cargo:rustc-link-lib=pthread");
-        }
-    } else {
-        println!("cargo:rustc-link-lib=pthread");
-    }
-
     cc::Build::new()
         .cpp(true) // Switch to C++ library compilation.
         .opt_level(2)
@@ -79,4 +69,15 @@ fn main() {
         .file("vendor/unrar/dll.cpp")
         .file("vendor/unrar/qopen.cpp")
         .compile("libunrar.a");
+
+    if cfg!(windows) {
+        println!("cargo:rustc-link-lib=powrprof");
+        println!("cargo:rustc-link-lib=shell32");
+        println!("cargo:rustc-link-lib=user32");
+        if cfg!(target_env = "gnu") {
+            println!("cargo:rustc-link-lib=pthread");
+        }
+    } else {
+        println!("cargo:rustc-link-lib=pthread");
+    }
 }
