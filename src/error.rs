@@ -210,9 +210,7 @@ impl ProvidedPasswordTooLong {
 
 impl fmt::Display for ProvidedPasswordTooLong {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}: length {}, expected less than or equal to {}",
-               error::Error::description(self),
-               self.0, self.1)
+        write!(f, "{}: length {}, expected less than or equal to {}", self, self.0, self.1)
     }
 }
 

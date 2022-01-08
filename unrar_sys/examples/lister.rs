@@ -2,7 +2,7 @@ extern crate unrar_sys;
 extern crate libc;
 
 use unrar_sys::*;
-use libc::{c_int, c_uint, c_long};
+use libc::c_int;
 use std::str;
 
 use std::ffi::{CStr, CString};
@@ -16,7 +16,7 @@ fn main() {
         writeln!(&mut stderr, "Please pass an archive as argument!").unwrap();
         std::process::exit(0)
     });
-    extern "C" fn callback(msg: c_uint, user_data: c_long, p1: c_long, p2: c_long) -> c_int {
+    extern "system" fn callback(msg: UINT, user_data: LPARAM, p1: LPARAM, p2: LPARAM) -> c_int {
         match (msg, p2) {
             (UCM_CHANGEVOLUME, RAR_VOL_ASK) => {
                 let ptr = p1 as *const _;
@@ -29,12 +29,13 @@ fn main() {
             _ => 0,
         }
     }
-    let mut data = OpenArchiveData::new(CString::new(file).unwrap().as_ptr(), RAR_OM_LIST_INCSPLIT);
+    let archive_path = CString::new(file).unwrap();
+    let mut data = OpenArchiveData::new(archive_path.as_ptr(), RAR_OM_LIST_INCSPLIT);
     let handle = unsafe { RAROpenArchive(&mut data as *mut _) };
     assert_eq!(data.open_result, 0);
     assert_eq!(handle.is_null(), false);
     let mut next_path = String::with_capacity(1024);
-    unsafe { RARSetCallback(handle, callback, &mut next_path as *mut String as c_long) };
+    unsafe { RARSetCallback(handle, callback, &mut next_path as *mut String as LPARAM) };
     let mut header = HeaderData::default();
     let mut result = 0;
     let mut process_result;
